@@ -1,2 +1,8 @@
 
 node_modules/
+
+.npm-cache/
+node_modules/
+.next/
+dist/
+build/
