@@ -58,7 +58,9 @@ export default function HotelDashboardPage() {
         const formattedMenu = finalMenuList.map((item, idx) => {
           const exactName = item.englishName || item.itemName || item.dishName || item.foodName || item.title || item.name || item.dish || item.strName || `Dish #${idx + 1}`;
           const exactPrice = item.price || item.cost || item.amount || item.rate || 150;
-          const isAvail = item.isAvailable !== undefined ? item.isAvailable : (item.available !== undefined ? item.available : true);
+          
+          // Fixed availability assignment to safely default to true unless explicitly false
+          const isAvail = item.isAvailable !== false && (item.available !== false);
 
           return {
             _id: item._id || item.id || `item-${idx}`,
