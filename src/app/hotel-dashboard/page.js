@@ -56,7 +56,6 @@ export default function HotelDashboardPage() {
         const finalMenuList = combinedMenu.length > 0 ? combinedMenu : allFoods;
 
         const formattedMenu = finalMenuList.map((item, idx) => {
-          // Explicitly checking englishName first, followed by all other variations
           const exactName = item.englishName || item.itemName || item.dishName || item.foodName || item.title || item.name || item.dish || item.strName || `Dish #${idx + 1}`;
           const exactPrice = item.price || item.cost || item.amount || item.rate || 150;
           const isAvail = item.isAvailable !== undefined ? item.isAvailable : (item.available !== undefined ? item.available : true);
@@ -144,7 +143,7 @@ export default function HotelDashboardPage() {
 
       {error && <div className="bg-orange-50 text-orange-700 text-xs font-bold p-3 rounded-xl border border-orange-200 text-center">{error}</div>}
 
-      {/* Incoming Orders Section */}
+      {/* Incoming Orders Section with Live Checkpoint Monitor */}
       <div className="space-y-2">
         <h3 className="text-xs font-black uppercase text-slate-700 px-1">📦 Incoming Orders ({orders.length})</h3>
         {orders.length === 0 ? (
@@ -152,22 +151,46 @@ export default function HotelDashboardPage() {
             No active customer orders for {hotelName} right now.
           </div>
         ) : (
-          orders.map((order, idx) => (
-            <div key={idx} className="bg-white border border-orange-100 rounded-2xl p-3.5 space-y-2 shadow-xs">
-              <div className="flex justify-between items-center text-xs font-black">
-                <span className="text-slate-900">Order #{order._id ? order._id.slice(-6) : (idx + 1)}</span>
-                <span className="text-orange-600 bg-orange-50 px-2 py-0.5 rounded-md">₹{order.totalAmount || order.total || 0}</span>
-              </div>
-              <div className="text-[11px] text-slate-600 space-y-0.5">
-                {order.items?.map((item, i) => (
-                  <div key={i} className="flex justify-between">
-                    <span>{item.quantity || 1}x {item.englishName || item.itemName || item.dishName || item.foodName || item.title || item.name || item.dish || 'Food Item'}</span>
-                    <span>₹{(item.price || 0) * (item.quantity || 1)}</span>
+          orders.map((order, idx) => {
+            const currentProgress = order.progress !== undefined ? order.progress : 0;
+            const currentStatusText = order.status || (currentProgress === 100 ? 'Delivered' : currentProgress === 70 ? 'Near Area' : currentProgress === 35 ? 'Picked' : 'Hub');
+            const assignedRider = order.acceptedBy || order.riderName || order.deliveryPartner || null;
+
+            return (
+              <div key={idx} className="bg-white border border-orange-100 rounded-2xl p-3.5 space-y-3 shadow-xs">
+                <div className="flex justify-between items-center text-xs font-black">
+                  <span className="text-slate-900">Order #{order._id ? order._id.slice(-6) : (idx + 1)}</span>
+                  <span className="text-orange-600 bg-orange-50 px-2 py-0.5 rounded-md font-mono">₹{order.totalAmount || order.total || order.totalPrice || 0}</span>
+                </div>
+
+                {/* Live Checkpoint Progress Status */}
+                <div className="bg-orange-50/70 border border-orange-200 p-2.5 rounded-xl space-y-1">
+                  <div className="flex justify-between items-center text-[10px] font-black">
+                    <span className="text-slate-700 uppercase">Live Delivery: <span className="text-orange-600">{currentStatusText}</span></span>
+                    <span className="text-orange-600 font-mono">{currentProgress}%</span>
                   </div>
-                ))}
+                  <div className="w-full bg-orange-200/50 h-1.5 rounded-full overflow-hidden">
+                    <div 
+                      className="bg-gradient-to-r from-red-500 to-orange-500 h-full transition-all duration-500" 
+                      style={{ width: `${currentProgress}%` }}
+                    ></div>
+                  </div>
+                  {assignedRider && (
+                    <p className="text-[10px] font-bold text-emerald-700 pt-0.5">🛵 Rider Assigned: {assignedRider}</p>
+                  )}
+                </div>
+
+                <div className="text-[11px] text-slate-600 space-y-0.5 pt-1 border-t border-orange-100">
+                  {order.items?.map((item, i) => (
+                    <div key={i} className="flex justify-between">
+                      <span>{item.quantity || 1}x {item.englishName || item.itemName || item.dishName || item.foodName || item.title || item.name || item.dish || 'Food Item'}</span>
+                      <span>₹{(item.price || 0) * (item.quantity || 1)}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 
