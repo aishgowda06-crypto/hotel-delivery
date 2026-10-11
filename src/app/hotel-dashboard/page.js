@@ -59,16 +59,19 @@ export default function HotelDashboardPage() {
           const exactName = item.englishName || item.itemName || item.dishName || item.foodName || item.title || item.name || item.dish || item.strName || `Dish #${idx + 1}`;
           const exactPrice = item.price || item.cost || item.amount || item.rate || 150;
           
-          // Fixed availability assignment to safely default to true unless explicitly false
           const isAvail = item.isAvailable !== false && (item.available !== false);
 
+          // Get the real database ID and filter out items without one
+          const validId = item._id || item.id;
+          if (!validId) return null;
+
           return {
-            _id: item._id || item.id || `item-${idx}`,
+            _id: validId,
             name: exactName,
             price: exactPrice,
             isAvailable: isAvail
           };
-        });
+        }).filter(Boolean);
 
         setMenuItems(formattedMenu);
         setLoading(false);
