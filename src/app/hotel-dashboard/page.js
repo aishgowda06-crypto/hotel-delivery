@@ -1,5 +1,6 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { io } from 'socket.io-client';
 
 export default function HotelDashboardPage() {
   const [hotelName, setHotelName] = useState('Partner Hotel');
@@ -9,12 +10,78 @@ export default function HotelDashboardPage() {
   const [hotelStatus, setHotelStatus] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  
+  // Navigation & Sound settings state
+  const [activeTab, setActiveTab] = useState('orders');
+  const [notificationSound, setNotificationSound] = useState('bell');
+  const [restaurantProfile, setRestaurantProfile] = useState({});
+  const [menuSearchQuery, setMenuSearchQuery] = useState(''); // Added search state for menu items
 
-  useEffect(() => {
-    const storedHotel = localStorage.getItem('shopmatries_hotel_name') || 'Partner Hotel';
-    setHotelName(storedHotel);
+  // Audio looping reference so sound repeats continuously until an order is accepted or rejected
+  const audioLoopRef = useRef(null);
 
+  // Play continuous audio alert loop using Web Audio API
+  const startAudioLoop = (soundType) => {
+    if (audioLoopRef.current) return; // Already playing
+
+    try {
+      const playTone = () => {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        
+        osc.type = soundType === 'siren' ? 'sawtooth' : soundType === 'chime' ? 'sine' : 'triangle';
+        osc.frequency.setValueAtTime(soundType === 'siren' ? 880 : 587.33, audioCtx.currentTime);
+        
+        gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 1.5);
+        
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        
+        osc.start();
+        osc.stop(audioCtx.currentTime + 1.5);
+      };
+
+      playTone();
+      audioLoopRef.current = setInterval(playTone, 2000);
+    } catch (e) {
+      console.log('Audio playback prevented or unsupported', e);
+    }
+  };
+
+  const stopAudioLoop = () => {
+    if (audioLoopRef.current) {
+      clearInterval(audioLoopRef.current);
+      audioLoopRef.current = null;
+    }
+  };
+
+  const playSingleAlert = (soundType) => {
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      
+      osc.type = soundType === 'siren' ? 'sawtooth' : soundType === 'chime' ? 'sine' : 'triangle';
+      osc.frequency.setValueAtTime(soundType === 'siren' ? 880 : 587.33, audioCtx.currentTime);
+      
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 1.5);
+      
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      
+      osc.start();
+      osc.stop(audioCtx.currentTime + 1.5);
+    } catch (e) {
+      console.log('Audio playback prevented or unsupported', e);
+    }
+  };
+
+  const fetchDashboardData = (targetHotel, isInitial = false) => {
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://food-cgs4.onrender.com';
+    const cleanTarget = targetHotel.trim().toLowerCase();
 
     Promise.all([
       fetch(`${API_URL}/api/orders`).then(res => res.json()).catch(() => []),
@@ -22,14 +89,22 @@ export default function HotelDashboardPage() {
       fetch(`${API_URL}/api/foods/restaurants`).then(res => res.json()).catch(() => [])
     ])
       .then(([orderData, foodData, restaurantData]) => {
-        const cleanTarget = storedHotel.trim().toLowerCase();
-
         // 1. Filter orders for this hotel
         const allOrders = Array.isArray(orderData) ? orderData : (orderData.orders || orderData.data || orderData.result || []);
         const filteredOrders = allOrders.filter(o => {
           const rest = o.restaurant || o.hotelName || o.restaurantName || o.hotel || o.brand || '';
           return rest.trim().toLowerCase() === cleanTarget;
         });
+
+        // Check if there are any pending/new incoming orders to trigger the continuous alarm loop
+        const hasPendingOrders = filteredOrders.some(o => !o.status || o.status === 'Pending' || o.status === 'Hub');
+        if (hasPendingOrders) {
+          const savedSound = localStorage.getItem('shopmatries_notification_sound') || 'bell';
+          startAudioLoop(savedSound);
+        } else {
+          stopAudioLoop();
+        }
+
         setOrders(filteredOrders);
 
         // 2. Extract restaurant and catalog items
@@ -42,6 +117,7 @@ export default function HotelDashboardPage() {
         if (currentRest) {
           setRestaurantId(currentRest._id || currentRest.id);
           setHotelStatus(currentRest.isManuallyOpen !== undefined ? currentRest.isManuallyOpen : (currentRest.isOpen !== undefined ? currentRest.isOpen : true));
+          setRestaurantProfile(currentRest);
         }
 
         const allFoods = Array.isArray(foodData) ? foodData : (foodData.foods || foodData.items || foodData.data || foodData.result || []);
@@ -58,10 +134,8 @@ export default function HotelDashboardPage() {
         const formattedMenu = finalMenuList.map((item, idx) => {
           const exactName = item.englishName || item.itemName || item.dishName || item.foodName || item.title || item.name || item.dish || item.strName || `Dish #${idx + 1}`;
           const exactPrice = item.price || item.cost || item.amount || item.rate || 150;
-          
           const isAvail = item.isAvailable !== false && (item.available !== false);
 
-          // Get the real database ID and filter out items without one
           const validId = item._id || item.id;
           if (!validId) return null;
 
@@ -74,13 +148,49 @@ export default function HotelDashboardPage() {
         }).filter(Boolean);
 
         setMenuItems(formattedMenu);
-        setLoading(false);
+        if (isInitial) setLoading(false);
       })
       .catch(err => {
         console.error('Failed to load dashboard data:', err);
-        setError('Unable to sync hotel data from backend.');
-        setLoading(false);
+        if (isInitial) {
+          setError('Unable to sync hotel data from backend.');
+          setLoading(false);
+        }
       });
+  };
+
+  useEffect(() => {
+    const storedHotel = localStorage.getItem('shopmatries_hotel_name') || 'Partner Hotel';
+    const storedSound = localStorage.getItem('shopmatries_notification_sound') || 'bell';
+    setHotelName(storedHotel);
+    setNotificationSound(storedSound);
+
+    // Initial fetch
+    fetchDashboardData(storedHotel, true);
+
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://food-cgs4.onrender.com';
+
+    // Socket.io real-time listener with continuous alert loop
+    const socket = io(API_URL);
+    socket.on('new-order', (newOrder) => {
+      const rest = newOrder.restaurant || newOrder.hotelName || newOrder.restaurantName || newOrder.hotel || newOrder.brand || '';
+      if (rest.trim().toLowerCase() === storedHotel.trim().toLowerCase()) {
+        setOrders(prev => [newOrder, ...prev]);
+        const savedSound = localStorage.getItem('shopmatries_notification_sound') || 'bell';
+        startAudioLoop(savedSound);
+      }
+    });
+
+    // Live polling interval every 5 seconds so everything updates automatically
+    const pollInterval = setInterval(() => {
+      fetchDashboardData(storedHotel, false);
+    }, 5000);
+
+    return () => {
+      socket.disconnect();
+      clearInterval(pollInterval);
+      stopAudioLoop();
+    };
   }, []);
 
   const toggleHotelStatus = async () => {
@@ -98,6 +208,25 @@ export default function HotelDashboardPage() {
       }
     } catch (err) {
       console.error('Failed to update hotel open status:', err);
+    }
+  };
+
+  const updateOrderStatus = async (orderId, newStatus) => {
+    try {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://food-cgs4.onrender.com';
+      await fetch(`${API_URL}/api/orders/${orderId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      });
+      
+      // Stop continuous sound loop since the order has now been addressed (Accepted/Rejected)
+      stopAudioLoop();
+
+      // Optimistic state update
+      setOrders(prev => prev.map(o => o._id === orderId ? { ...o, status: newStatus } : o));
+    } catch (err) {
+      console.error('Failed to update order status:', err);
     }
   };
 
@@ -119,6 +248,13 @@ export default function HotelDashboardPage() {
     }));
   };
 
+  const handleSoundChange = (e) => {
+    const soundChoice = e.target.value;
+    setNotificationSound(soundChoice);
+    localStorage.setItem('shopmatries_notification_sound', soundChoice);
+    playSingleAlert(soundChoice);
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -127,10 +263,15 @@ export default function HotelDashboardPage() {
     );
   }
 
+  // Filter menu items based on search input
+  const filteredMenuItems = menuItems.filter(item =>
+    item.name.toLowerCase().includes(menuSearchQuery.toLowerCase())
+  );
+
   return (
     <div className="max-w-md mx-auto space-y-4 pb-10">
       
-      {/* Hotel Status Banner */}
+      {/* Header & Status Banner */}
       <div className="bg-white border border-orange-100 p-4 rounded-3xl shadow-sm space-y-3">
         <div className="flex justify-between items-center">
           <div>
@@ -148,81 +289,222 @@ export default function HotelDashboardPage() {
 
       {error && <div className="bg-orange-50 text-orange-700 text-xs font-bold p-3 rounded-xl border border-orange-200 text-center">{error}</div>}
 
-      {/* Incoming Orders Section with Live Checkpoint Monitor */}
-      <div className="space-y-2">
-        <h3 className="text-xs font-black uppercase text-slate-700 px-1">📦 Incoming Orders ({orders.length})</h3>
-        {orders.length === 0 ? (
-          <div className="bg-white border border-orange-100 rounded-2xl p-6 text-center text-slate-400 text-xs font-medium">
-            No active customer orders for {hotelName} right now.
-          </div>
-        ) : (
-          orders.map((order, idx) => {
-            const currentProgress = order.progress !== undefined ? order.progress : 0;
-            const currentStatusText = order.status || (currentProgress === 100 ? 'Delivered' : currentProgress === 70 ? 'Near Area' : currentProgress === 35 ? 'Picked' : 'Hub');
-            const assignedRider = order.acceptedBy || order.riderName || order.deliveryPartner || null;
-
-            return (
-              <div key={idx} className="bg-white border border-orange-100 rounded-2xl p-3.5 space-y-3 shadow-xs">
-                <div className="flex justify-between items-center text-xs font-black">
-                  <span className="text-slate-900">Order #{order._id ? order._id.slice(-6) : (idx + 1)}</span>
-                  <span className="text-orange-600 bg-orange-50 px-2 py-0.5 rounded-md font-mono">₹{order.totalAmount || order.total || order.totalPrice || 0}</span>
-                </div>
-
-                {/* Live Checkpoint Progress Status */}
-                <div className="bg-orange-50/70 border border-orange-200 p-2.5 rounded-xl space-y-1">
-                  <div className="flex justify-between items-center text-[10px] font-black">
-                    <span className="text-slate-700 uppercase">Live Delivery: <span className="text-orange-600">{currentStatusText}</span></span>
-                    <span className="text-orange-600 font-mono">{currentProgress}%</span>
-                  </div>
-                  <div className="w-full bg-orange-200/50 h-1.5 rounded-full overflow-hidden">
-                    <div 
-                      className="bg-gradient-to-r from-red-500 to-orange-500 h-full transition-all duration-500" 
-                      style={{ width: `${currentProgress}%` }}
-                    ></div>
-                  </div>
-                  {assignedRider && (
-                    <p className="text-[10px] font-bold text-emerald-700 pt-0.5">🛵 Rider Assigned: {assignedRider}</p>
-                  )}
-                </div>
-
-                <div className="text-[11px] text-slate-600 space-y-0.5 pt-1 border-t border-orange-100">
-                  {order.items?.map((item, i) => (
-                    <div key={i} className="flex justify-between">
-                      <span>{item.quantity || 1}x {item.englishName || item.itemName || item.dishName || item.foodName || item.title || item.name || item.dish || 'Food Item'}</span>
-                      <span>₹{(item.price || 0) * (item.quantity || 1)}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })
-        )}
+      {/* Tab Navigation Bar (Integrated cleanly in page body) */}
+      <div className="flex bg-orange-50/80 p-1 rounded-2xl border border-orange-100">
+        <button
+          onClick={() => setActiveTab('orders')}
+          className={`flex-1 py-2 px-2 rounded-xl text-[10px] font-black uppercase transition cursor-pointer ${activeTab === 'orders' ? 'bg-orange-600 text-white shadow-sm' : 'text-slate-600 hover:text-orange-600'}`}
+        >
+          📦 Orders ({orders.length})
+        </button>
+        <button
+          onClick={() => setActiveTab('control')}
+          className={`flex-1 py-2 px-2 rounded-xl text-[10px] font-black uppercase transition cursor-pointer ${activeTab === 'control' ? 'bg-orange-600 text-white shadow-sm' : 'text-slate-600 hover:text-orange-600'}`}
+        >
+          ⚙️ Control
+        </button>
+        <button
+          onClick={() => setActiveTab('menu')}
+          className={`flex-1 py-2 px-2 rounded-xl text-[10px] font-black uppercase transition cursor-pointer ${activeTab === 'menu' ? 'bg-orange-600 text-white shadow-sm' : 'text-slate-600 hover:text-orange-600'}`}
+        >
+          🍱 Menu
+        </button>
+        <button
+          onClick={() => setActiveTab('profile')}
+          className={`flex-1 py-2 px-2 rounded-xl text-[10px] font-black uppercase transition cursor-pointer ${activeTab === 'profile' ? 'bg-orange-600 text-white shadow-sm' : 'text-slate-600 hover:text-orange-600'}`}
+        >
+          👤 Profile
+        </button>
       </div>
 
-      {/* Menu Item Availability Controls */}
-      <div className="space-y-2 pt-2">
-        <h3 className="text-xs font-black uppercase text-slate-700 px-1">🍱 Menu Item Availability Controls</h3>
-        {menuItems.length === 0 ? (
-          <div className="bg-white border border-orange-100 rounded-2xl p-6 text-center text-slate-400 text-xs font-medium">
-            No food items found in catalog for {hotelName}.
-          </div>
-        ) : (
-          menuItems.map((item) => (
-            <div key={item._id} className="bg-white border border-orange-100 rounded-2xl p-3 flex justify-between items-center shadow-xs">
-              <div className="space-y-0.5">
-                <h4 className="text-xs font-black text-slate-900">{item.name}</h4>
-                <p className="text-[10px] text-slate-500">₹{item.price}</p>
+      {/* TAB 1: ORDERS */}
+      {activeTab === 'orders' && (
+        <div className="space-y-2">
+          <h3 className="text-xs font-black uppercase text-slate-700 px-1">📦 Live Incoming Orders ({orders.length})</h3>
+          {orders.length === 0 ? (
+            <div className="bg-white border border-orange-100 rounded-2xl p-6 text-center text-slate-400 text-xs font-medium">
+              No active customer orders for {hotelName} right now.
+            </div>
+          ) : (
+            orders.map((order, idx) => {
+              const currentProgress = order.progress !== undefined ? order.progress : 0;
+              const currentStatusText = order.status || (currentProgress === 100 ? 'Delivered' : currentProgress === 70 ? 'Near Area' : currentProgress === 35 ? 'Picked' : 'Hub');
+              const assignedRider = order.acceptedBy || order.riderName || order.deliveryPartner || null;
+              const orderId = order._id || `order-${idx}`;
+
+              return (
+                <div key={orderId} className="bg-white border border-orange-100 rounded-2xl p-3.5 space-y-3 shadow-xs">
+                  <div className="flex justify-between items-center text-xs font-black">
+                    <span className="text-slate-900">Order #{order._id ? order._id.slice(-6) : (idx + 1)}</span>
+                    <span className="text-orange-600 bg-orange-50 px-2 py-0.5 rounded-md font-mono">₹{order.totalAmount || order.total || order.totalPrice || 0}</span>
+                  </div>
+
+                  {/* Accept / Reject Action Buttons for Preparation Confirmation */}
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      onClick={() => updateOrderStatus(order._id, 'Preparing')}
+                      className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white py-1.5 rounded-xl text-[10px] font-black shadow-sm transition cursor-pointer"
+                    >
+                      ✅ Accept & Prepare
+                    </button>
+                    <button
+                      onClick={() => updateOrderStatus(order._id, 'Rejected')}
+                      className="flex-1 bg-rose-500 hover:bg-rose-600 text-white py-1.5 rounded-xl text-[10px] font-black shadow-sm transition cursor-pointer"
+                    >
+                      ❌ Reject
+                    </button>
+                  </div>
+
+                  {/* Live Checkpoint Progress Status */}
+                  <div className="bg-orange-50/70 border border-orange-200 p-2.5 rounded-xl space-y-1">
+                    <div className="flex justify-between items-center text-[10px] font-black">
+                      <span className="text-slate-700 uppercase">Live Delivery: <span className="text-orange-600">{currentStatusText}</span></span>
+                      <span className="text-orange-600 font-mono">{currentProgress}%</span>
+                    </div>
+                    <div className="w-full bg-orange-200/50 h-1.5 rounded-full overflow-hidden">
+                      <div 
+                        className="bg-gradient-to-r from-red-500 to-orange-500 h-full transition-all duration-500" 
+                        style={{ width: `${currentProgress}%` }}
+                      ></div>
+                    </div>
+                    {assignedRider && (
+                      <p className="text-[10px] font-bold text-emerald-700 pt-0.5">🛵 Rider Assigned: {assignedRider}</p>
+                    )}
+                  </div>
+
+                  <div className="text-[11px] text-slate-600 space-y-0.5 pt-1 border-t border-orange-100">
+                    {order.items?.map((item, i) => (
+                      <div key={i} className="flex justify-between">
+                        <span>{item.quantity || 1}x {item.englishName || item.itemName || item.dishName || item.foodName || item.title || item.name || item.dish || 'Food Item'}</span>
+                        <span>₹{(item.price || 0) * (item.quantity || 1)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+
+      {/* TAB 2: HOTEL CONTROL */}
+      {activeTab === 'control' && (
+        <div className="space-y-4">
+          <div className="bg-white border border-orange-100 p-4 rounded-2xl space-y-3">
+            <h3 className="text-xs font-black uppercase text-slate-700">⚙️ Store Operational Control</h3>
+            <div className="flex justify-between items-center pt-2 border-t border-orange-50">
+              <div>
+                <p className="text-xs font-bold text-slate-800">Instant Manual Override</p>
+                <p className="text-[10px] text-slate-500">Force open or close store for incoming orders</p>
               </div>
               <button
-                onClick={() => toggleItemAvailability(item._id)}
-                className={`px-3 py-1.5 rounded-xl text-[10px] font-black transition cursor-pointer ${item.isAvailable ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'}`}
+                onClick={toggleHotelStatus}
+                className={`px-3 py-1.5 rounded-xl text-xs font-black transition cursor-pointer ${hotelStatus ? 'bg-emerald-500 text-white' : 'bg-rose-500 text-white'}`}
               >
-                {item.isAvailable ? '🟢 Serving' : '🔴 Closed'}
+                {hotelStatus ? '🟢 Open' : '🔴 Closed'}
               </button>
             </div>
-          ))
-        )}
-      </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: MENU ITEMS */}
+      {activeTab === 'menu' && (
+        <div className="space-y-3">
+          <div className="flex justify-between items-center px-1">
+            <h3 className="text-xs font-black uppercase text-slate-700">🍱 Menu Item Availability Controls</h3>
+          </div>
+
+          {/* Search bar for menu items */}
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="Search food items by name..."
+              value={menuSearchQuery}
+              onChange={(e) => setMenuSearchQuery(e.target.value)}
+              className="w-full bg-white border border-orange-200 text-xs font-bold text-slate-800 p-3 rounded-2xl shadow-xs focus:outline-none focus:border-orange-500"
+            />
+            {menuSearchQuery && (
+              <button
+                onClick={() => setMenuSearchQuery('')}
+                className="absolute right-3 top-3 text-xs font-bold text-slate-400 hover:text-slate-600"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+
+          {filteredMenuItems.length === 0 ? (
+            <div className="bg-white border border-orange-100 rounded-2xl p-6 text-center text-slate-400 text-xs font-medium">
+              {menuItems.length === 0 ? `No food items found in catalog for ${hotelName}.` : 'No matching food items found.'}
+            </div>
+          ) : (
+            filteredMenuItems.map((item) => (
+              <div key={item._id} className="bg-white border border-orange-100 rounded-2xl p-3 flex justify-between items-center shadow-xs">
+                <div className="space-y-0.5">
+                  <h4 className="text-xs font-black text-slate-900">{item.name}</h4>
+                  <p className="text-[10px] text-slate-500">₹{item.price}</p>
+                </div>
+                <button
+                  onClick={() => toggleItemAvailability(item._id)}
+                  className={`px-3 py-1.5 rounded-xl text-[10px] font-black transition cursor-pointer ${item.isAvailable ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'}`}
+                >
+                  {item.isAvailable ? '🟢 Serving' : '🔴 Closed'}
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* TAB 4: PROFILE & SOUND SETTINGS */}
+      {activeTab === 'profile' && (
+        <div className="space-y-4">
+          <div className="bg-white border border-orange-100 p-4 rounded-2xl space-y-3">
+            <h3 className="text-xs font-black uppercase text-slate-700">👤 Hotel Partner Profile</h3>
+            <div className="space-y-2 text-xs text-slate-700 pt-1">
+              <div className="flex justify-between border-b border-orange-50 pb-2">
+                <span className="font-bold text-slate-500">Hotel Name:</span>
+                <span className="font-black text-slate-900">{hotelName}</span>
+              </div>
+              <div className="flex justify-between border-b border-orange-50 pb-2">
+                <span className="font-bold text-slate-500">Restaurant ID:</span>
+                <span className="font-mono text-[10px] text-slate-800">{restaurantId || 'Synced'}</span>
+              </div>
+              <div className="flex justify-between border-b border-orange-50 pb-2">
+                <span className="font-bold text-slate-500">City / Location:</span>
+                <span className="font-black text-slate-900">{restaurantProfile.city || 'Shivamogga'}</span>
+              </div>
+              <div className="flex justify-between pb-1">
+                <span className="font-bold text-slate-500">Account Status:</span>
+                <span className="text-emerald-600 font-black">Active Partner</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white border border-orange-100 p-4 rounded-2xl space-y-3">
+            <h3 className="text-xs font-black uppercase text-slate-700">🔔 Incoming Order Alert Sound Settings</h3>
+            <p className="text-[10px] text-slate-500">Choose the notification chime played when a customer places a new order.</p>
+            <div className="flex items-center space-x-3 pt-1">
+              <select
+                value={notificationSound}
+                onChange={handleSoundChange}
+                className="flex-1 bg-orange-50 border border-orange-200 text-xs font-bold text-slate-800 p-2.5 rounded-xl focus:outline-none"
+              >
+                <option value="bell">🔔 Classic Bell</option>
+                <option value="chime">🎶 Digital Chime</option>
+                <option value="siren">🚨 Loud Alert</option>
+              </select>
+              <button
+                onClick={() => playSingleAlert(notificationSound)}
+                className="bg-orange-600 text-white px-4 py-2.5 rounded-xl text-xs font-black shadow-sm cursor-pointer hover:bg-orange-700"
+              >
+                Test Sound
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

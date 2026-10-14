@@ -73,7 +73,7 @@ export default function RootLayout({ children }) {
                 className={`flex flex-col items-center py-1 px-4 rounded-xl transition ${pathname === '/hotel-dashboard' ? 'text-orange-600 font-bold scale-105' : 'text-slate-400 font-medium hover:text-slate-600'}`}
               >
                 <span className="text-sm">📦</span>
-                <span className="text-[9px]">Orders</span>
+                <span className="text-[9px]">Home</span>
               </Link>
             </nav>
           )}

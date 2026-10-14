@@ -6,11 +6,21 @@ export default function DeliveryLiveOrders() {
   const [isDeliveryLoggedIn, setIsDeliveryLoggedIn] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [orders, setOrders] = useState([]);
+  
+  // New tab and profile state for delivery partner
+  const [activeTab, setActiveTab] = useState('live');
+  const [deliveryPartnerName, setDeliveryPartnerName] = useState('Delivery Partner');
+  const [deliveryPartnerPhone, setDeliveryPartnerPhone] = useState('');
 
   useEffect(() => {
     const deliveryAuth = localStorage.getItem('shopmatries_is_delivery_partner');
     const token = localStorage.getItem('shopmatries_token');
+    const savedName = localStorage.getItem('shopmatries_username') || localStorage.getItem('shopmatries_phone') || 'Delivery Partner';
+    const savedPhone = localStorage.getItem('shopmatries_phone') || '9876543210';
     
+    setDeliveryPartnerName(savedName);
+    setDeliveryPartnerPhone(savedPhone);
+
     if (deliveryAuth === 'true' || token) {
       setIsDeliveryLoggedIn(true);
     } else {
@@ -178,172 +188,239 @@ export default function DeliveryLiveOrders() {
     );
   }
 
+  // Filter orders based on active tab ('live' vs 'profile')
+  const myAcceptedOrders = orders.filter(ord => {
+    const partner = getAcceptedPartner(ord);
+    return partner && partner.trim().toLowerCase() === deliveryPartnerName.trim().toLowerCase() && ord.status !== 'Delivered';
+  });
+
+  const myDeliveredOrders = orders.filter(ord => {
+    const partner = getAcceptedPartner(ord);
+    return partner && partner.trim().toLowerCase() === deliveryPartnerName.trim().toLowerCase() && ord.status === 'Delivered';
+  });
+
   return (
-    <div className="space-y-4 pb-6">
+    <div className="space-y-4 pb-20">
       
-      {/* Header */}
+      {/* Header & Tab Navigation Bar */}
       <div className="flex justify-between items-center px-1">
         <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center space-x-1.5">
           <span>⚡ Live 1-Tap Checkpoint Dispatcher</span>
         </h2>
       </div>
 
-      {/* Orders List */}
-      <div className="space-y-4">
-        {orders.length === 0 ? (
-          <div className="bg-white border border-orange-100 p-8 rounded-3xl text-center space-y-2 shadow-sm">
-            <p className="text-2xl">🎉</p>
-            <p className="text-xs font-bold text-slate-700">No active customer orders found right now.</p>
-          </div>
-        ) : (
-          orders.map((ord, idx) => {
-            const orderId = ord._id || ord.id;
-            const displayTime = formatOrderDateTime(ord.createdAt || ord.time);
-            
-            const assignedPartner = getAcceptedPartner(ord);
-            const isAlreadyAccepted = Boolean(assignedPartner);
-
-            const orderHotelName = ord.hotelName || ord.restaurant || ord.brand || (ord.items && ord.items[0]?.hotelName) || (ord.items && ord.items[0]?.restaurant) || (ord.items && ord.items[0]?.brand) || 'Partner Hotel';
-
-            const rawAddress = ord.address || ord.deliveryAddress || ord.location || 'Exact address not provided';
-            const cleanAddressEnglish = rawAddress.replace(/\[GPS:[^\]]+\]/g, '').trim();
-
-            return (
-              <div key={orderId || idx} className="bg-white border border-orange-100 p-4 rounded-3xl shadow-sm space-y-3 relative">
-                
-                {/* Top row: Order ID, Hotel Name & Exact Date/Time */}
-                <div className="flex justify-between items-center">
-                  <div className="flex flex-col space-y-0.5">
-                    <div className="flex items-center space-x-1.5">
-                      <span className="text-xs font-black font-mono text-orange-600">#{orderId ? orderId.slice(-6) : (idx + 1)}</span>
-                      <span className="bg-orange-100 text-orange-800 text-[9px] font-black px-1.5 py-0.5 rounded uppercase">
-                        🏨 {orderHotelName}
-                      </span>
-                    </div>
-                    <span className="text-[10px] font-bold text-slate-500">📅 {displayTime}</span>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-[9px] uppercase font-bold text-slate-400 mr-1">TOTAL</span>
-                    <span className="text-sm font-black text-orange-600 font-mono">₹{ord.totalPrice || ord.estimatedPrice || 0}</span>
-                  </div>
-                </div>
-
-                {/* First-Come, First-Served Acceptance Status Banner */}
-                <div className={`p-2.5 rounded-xl border text-xs flex justify-between items-center ${isAlreadyAccepted ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-amber-50 border-amber-200 text-amber-900'}`}>
-                  <div>
-                    <p className="font-extrabold text-[11px]">
-                      {isAlreadyAccepted ? `✅ Accepted by: ${assignedPartner}` : '⚡ Open Order (First-Come, First-Served)'}
-                    </p>
-                    <p className="text-[9px] opacity-80">
-                      {isAlreadyAccepted ? 'Locked exclusively for assigned delivery partner.' : 'Tap accept to lock this order exclusively for delivery.'}
-                    </p>
-                  </div>
-                  {!isAlreadyAccepted ? (
-                    <button
-                      onClick={() => handleAcceptByPartner(orderId, assignedPartner)}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[10px] px-3 py-1.5 rounded-lg shadow transition cursor-pointer active:scale-95 shrink-0"
-                    >
-                      Accept Order 🎯
-                    </button>
-                  ) : (
-                    <span className="bg-emerald-200 text-emerald-900 text-[9px] font-black px-2 py-1 rounded-md uppercase">
-                      Claimed 🔒
-                    </span>
-                  )}
-                </div>
-
-                {/* Customer Contact & Full English Address / GPS Map Tracking */}
-                <div className="text-xs space-y-2 bg-orange-50/50 p-2.5 rounded-xl border border-orange-100">
-                  <div className="flex justify-between items-center">
-                    <span className="font-bold text-slate-900">👤 {ord.customerName || ord.name || 'Valued Customer'}</span>
-                    <a href={`tel:${ord.phone || ord.mobile}`} className="text-[10px] text-orange-700 font-bold bg-orange-50 px-2 py-0.5 rounded border border-orange-200">
-                      📞 {ord.phone || ord.mobile || 'Not provided'}
-                    </a>
-                  </div>
-
-                  <div className="space-y-1 pt-1 border-t border-orange-200/50">
-                    <p className="text-[11px] font-semibold text-slate-800">
-                      📍 <span className="font-normal text-slate-600">{cleanAddressEnglish || 'Location address not specified'}</span>
-                    </p>
-                    {ord.area && (
-                      <p className="text-[10px] font-medium text-slate-500">
-                        🏙️ Locality / Area: <strong className="text-slate-700">{ord.area}</strong>
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="flex justify-end pt-1">
-                    <button
-                      onClick={() => handleOpenGoogleMaps(rawAddress)}
-                      className="bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600 text-white text-[10px] font-extrabold px-2.5 py-1.5 rounded-lg shadow-sm transition flex items-center space-x-1 shrink-0 active:scale-95 cursor-pointer"
-                    >
-                      <span>🗺️ Track Live Map</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* 1-Tap Dispatch Checkpoints */}
-                <div className="space-y-1.5">
-                  <p className="text-[9px] font-black uppercase text-slate-400 tracking-wider">1-Tap Dispatch Checkpoints:</p>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    <button 
-                      onClick={() => handleCheckpointUpdate(orderId, 'Hub', 0, assignedPartner)}
-                      className={`py-2 px-3 rounded-xl text-[10px] font-bold border transition cursor-pointer active:scale-95 ${ord.progress === 0 ? 'bg-orange-500 text-white border-orange-500 shadow-sm' : 'bg-orange-50/30 text-slate-700 border-orange-100 hover:bg-orange-50'}`}
-                    >
-                      1. Hub (0%)
-                    </button>
-                    <button 
-                      onClick={() => handleCheckpointUpdate(orderId, 'Picked', 35, assignedPartner)}
-                      className={`py-2 px-3 rounded-xl text-[10px] font-bold border transition cursor-pointer active:scale-95 ${ord.progress === 35 ? 'bg-orange-500 text-white border-orange-500 shadow-sm' : 'bg-orange-50/30 text-slate-700 border-orange-100 hover:bg-orange-50'}`}
-                    >
-                      2. Picked (35%)
-                    </button>
-                    <button 
-                      onClick={() => handleCheckpointUpdate(orderId, 'Near Area', 70, assignedPartner)}
-                      className={`py-2 px-3 rounded-xl text-[10px] font-bold border transition cursor-pointer active:scale-95 ${ord.progress === 70 ? 'bg-orange-500 text-white border-orange-500 shadow-sm' : 'bg-orange-50/30 text-slate-700 border-orange-100 hover:bg-orange-50'}`}
-                    >
-                      3. Near Area (70%)
-                    </button>
-                    <button 
-                      onClick={() => handleCheckpointUpdate(orderId, 'Delivered', 100, assignedPartner)}
-                      className={`py-2 px-3 rounded-xl text-[10px] font-bold border transition cursor-pointer active:scale-95 ${ord.progress === 100 ? 'bg-orange-500 text-white border-orange-500 shadow-sm' : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'}`}
-                    >
-                      4. Delivered (100%)
-                    </button>
-                  </div>
-                </div>
-
-                {/* Ordered Items Breakdown */}
-                <div className="space-y-1.5 pt-2 border-t border-orange-100">
-                  <div className="flex justify-between items-center">
-                    <p className="text-[10px] font-bold uppercase text-slate-400">Order Items Breakdown</p>
-                  </div>
-                  
-                  <div className="space-y-1">
-                    {ord.items?.map((item, i) => (
-                      <div key={i} className="flex justify-between items-center text-xs bg-orange-50/30 p-2 rounded-lg border border-orange-100">
-                        <span className="text-slate-800 font-medium">{item.name || item.englishName || 'Item'} <span className="text-slate-400 text-[10px]">({item.quantity || item.qty} qty)</span></span>
-                        <span className="font-mono font-bold text-orange-600">₹{(item.price || 0) * (item.quantity || item.qty || 1)}</span>
-                      </div>
-                    ))}
-
-                    <div className="flex justify-between items-center text-xs bg-orange-50/60 p-2 rounded-lg border border-orange-200">
-                      <span className="text-orange-900 font-bold">🛵 Delivery Fee</span>
-                      <span className="font-mono font-bold text-orange-700">₹{ord.deliveryFee || 30}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Footer Payment Info */}
-                <div className="flex justify-between items-center pt-2 text-[11px] border-t border-orange-100">
-                  <span className="text-slate-500 font-medium">Payment: <strong className="text-slate-900">{ord.paymentMode || 'Online'}</strong> ({ord.paymentStatus || 'Paid'})</span>
-                </div>
-
-              </div>
-            );
-          })
-        )}
+      <div className="flex bg-orange-50/80 p-1 rounded-2xl border border-orange-100">
+        <button
+          onClick={() => setActiveTab('live')}
+          className={`flex-1 py-2 px-2 rounded-xl text-[10px] font-black uppercase transition cursor-pointer ${activeTab === 'live' ? 'bg-orange-600 text-white shadow-sm' : 'text-slate-600 hover:text-orange-600'}`}
+        >
+          🛵 Live Orders ({orders.filter(o => o.status !== 'Rejected' && o.status !== 'Delivered').length})
+        </button>
+        <button
+          onClick={() => setActiveTab('profile')}
+          className={`flex-1 py-2 px-2 rounded-xl text-[10px] font-black uppercase transition cursor-pointer ${activeTab === 'profile' ? 'bg-orange-600 text-white shadow-sm' : 'text-slate-600 hover:text-orange-600'}`}
+        >
+          👤 Partner Profile
+        </button>
       </div>
+
+      {/* TAB 1: LIVE ORDERS DISPATCH */}
+      {activeTab === 'live' && (
+        <div className="space-y-4">
+          {orders.filter(o => o.status !== 'Delivered').length === 0 ? (
+            <div className="bg-white border border-orange-100 p-8 rounded-3xl text-center space-y-2 shadow-sm">
+              <p className="text-2xl">🎉</p>
+              <p className="text-xs font-bold text-slate-700">No active customer orders found right now.</p>
+            </div>
+          ) : (
+            orders.filter(o => o.status !== 'Delivered').map((ord, idx) => {
+              const orderId = ord._id || ord.id;
+              const displayTime = formatOrderDateTime(ord.createdAt || ord.time);
+              
+              const assignedPartner = getAcceptedPartner(ord);
+              const isAlreadyAccepted = Boolean(assignedPartner);
+              const isRejectedByHotel = ord.status === 'Rejected';
+
+              const orderHotelName = ord.hotelName || ord.restaurant || ord.brand || (ord.items && ord.items[0]?.hotelName) || (ord.items && ord.items[0]?.restaurant) || (ord.items && ord.items[0]?.brand) || 'Partner Hotel';
+
+              const rawAddress = ord.address || ord.deliveryAddress || ord.location || 'Exact address not provided';
+              const cleanAddressEnglish = rawAddress.replace(/\[GPS:[^\]]+\]/g, '').trim();
+
+              return (
+                <div key={orderId || idx} className="bg-white border border-orange-100 p-4 rounded-3xl shadow-sm space-y-3 relative">
+                  
+                  {/* Top row: Order ID, Hotel Name & Exact Date/Time */}
+                  <div className="flex justify-between items-center">
+                    <div className="flex flex-col space-y-0.5">
+                      <div className="flex items-center space-x-1.5">
+                        <span className="text-xs font-black font-mono text-orange-600">#{orderId ? orderId.slice(-6) : (idx + 1)}</span>
+                        <span className="bg-orange-100 text-orange-800 text-[9px] font-black px-1.5 py-0.5 rounded uppercase">
+                          🏨 {orderHotelName}
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-bold text-slate-500">📅 {displayTime}</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-[9px] uppercase font-bold text-slate-400 mr-1">TOTAL</span>
+                      <span className="text-sm font-black text-orange-600 font-mono">₹{ord.totalPrice || ord.estimatedPrice || 0}</span>
+                    </div>
+                  </div>
+
+                  {/* Hotel Rejection Notice if Hotel Rejected */}
+                  {isRejectedByHotel && (
+                    <div className="bg-rose-50 border border-rose-200 text-rose-800 p-3 rounded-xl text-xs font-bold text-center">
+                      ❌ Order Rejected by Hotel Partner. Delivery dispatch cancelled.
+                    </div>
+                  )}
+
+                  {!isRejectedByHotel && (
+                    <>
+                      {/* First-Come, First-Served Acceptance Status Banner */}
+                      <div className={`p-2.5 rounded-xl border text-xs flex justify-between items-center ${isAlreadyAccepted ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-amber-50 border-amber-200 text-amber-900'}`}>
+                        <div>
+                          <p className="font-extrabold text-[11px]">
+                            {isAlreadyAccepted ? `✅ Accepted by: ${assignedPartner}` : '⚡ Open Order (First-Come, First-Served)'}
+                          </p>
+                          <p className="text-[9px] opacity-80">
+                            {isAlreadyAccepted ? 'Locked exclusively for assigned delivery partner.' : 'Tap accept to lock this order exclusively for delivery.'}
+                          </p>
+                        </div>
+                        {!isAlreadyAccepted ? (
+                          <button
+                            onClick={() => handleAcceptByPartner(orderId, assignedPartner)}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[10px] px-3 py-1.5 rounded-lg shadow transition cursor-pointer active:scale-95 shrink-0"
+                          >
+                            Accept Order 🎯
+                          </button>
+                        ) : (
+                          <span className="bg-emerald-200 text-emerald-900 text-[9px] font-black px-2 py-1 rounded-md uppercase">
+                            Claimed 🔒
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Customer Contact & Full English Address / GPS Map Tracking */}
+                      <div className="text-xs space-y-2 bg-orange-50/50 p-2.5 rounded-xl border border-orange-100">
+                        <div className="flex justify-between items-center">
+                          <span className="font-bold text-slate-900">👤 {ord.customerName || ord.name || 'Valued Customer'}</span>
+                          <a href={`tel:${ord.phone || ord.mobile}`} className="text-[10px] text-orange-700 font-bold bg-orange-50 px-2 py-0.5 rounded border border-orange-200">
+                            📞 {ord.phone || ord.mobile || 'Not provided'}
+                          </a>
+                        </div>
+
+                        <div className="space-y-1 pt-1 border-t border-orange-200/50">
+                          <p className="text-[11px] font-semibold text-slate-800">
+                            📍 <span className="font-normal text-slate-600">{cleanAddressEnglish || 'Location address not specified'}</span>
+                          </p>
+                          {ord.area && (
+                            <p className="text-[10px] font-medium text-slate-500">
+                              🏙️ Locality / Area: <strong className="text-slate-700">{ord.area}</strong>
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="flex justify-end pt-1">
+                          <button
+                            onClick={() => handleOpenGoogleMaps(rawAddress)}
+                            className="bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600 text-white text-[10px] font-extrabold px-2.5 py-1.5 rounded-lg shadow-sm transition flex items-center space-x-1 shrink-0 active:scale-95 cursor-pointer"
+                          >
+                            <span>🗺️ Track Live Map</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 1-Tap Dispatch Checkpoints */}
+                      <div className="space-y-1.5">
+                        <p className="text-[9px] font-black uppercase text-slate-400 tracking-wider">1-Tap Dispatch Checkpoints:</p>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <button 
+                            onClick={() => handleCheckpointUpdate(orderId, 'Hub', 0, assignedPartner)}
+                            className={`py-2 px-3 rounded-xl text-[10px] font-bold border transition cursor-pointer active:scale-95 ${ord.progress === 0 ? 'bg-orange-500 text-white border-orange-500 shadow-sm' : 'bg-orange-50/30 text-slate-700 border-orange-100 hover:bg-orange-50'}`}
+                          >
+                            1. Hub (0%)
+                          </button>
+                          <button 
+                            onClick={() => handleCheckpointUpdate(orderId, 'Picked', 35, assignedPartner)}
+                            className={`py-2 px-3 rounded-xl text-[10px] font-bold border transition cursor-pointer active:scale-95 ${ord.progress === 35 ? 'bg-orange-500 text-white border-orange-500 shadow-sm' : 'bg-orange-50/30 text-slate-700 border-orange-100 hover:bg-orange-50'}`}
+                          >
+                            2. Picked (35%)
+                          </button>
+                          <button 
+                            onClick={() => handleCheckpointUpdate(orderId, 'Near Area', 70, assignedPartner)}
+                            className={`py-2 px-3 rounded-xl text-[10px] font-bold border transition cursor-pointer active:scale-95 ${ord.progress === 70 ? 'bg-orange-500 text-white border-orange-500 shadow-sm' : 'bg-orange-50/30 text-slate-700 border-orange-100 hover:bg-orange-50'}`}
+                          >
+                            3. Near Area (70%)
+                          </button>
+                          <button 
+                            onClick={() => handleCheckpointUpdate(orderId, 'Delivered', 100, assignedPartner)}
+                            className={`py-2 px-3 rounded-xl text-[10px] font-bold border transition cursor-pointer active:scale-95 ${ord.progress === 100 ? 'bg-orange-500 text-white border-orange-500 shadow-sm' : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'}`}
+                          >
+                            4. Delivered (100%)
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {/* Ordered Items Breakdown */}
+                  <div className="space-y-1.5 pt-2 border-t border-orange-100">
+                    <div className="flex justify-between items-center">
+                      <p className="text-[10px] font-bold uppercase text-slate-400">Order Items Breakdown</p>
+                    </div>
+                    
+                    <div className="space-y-1">
+                      {ord.items?.map((item, i) => (
+                        <div key={i} className="flex justify-between items-center text-xs bg-orange-50/30 p-2 rounded-lg border border-orange-100">
+                          <span className="text-slate-800 font-medium">{item.name || item.englishName || 'Item'} <span className="text-slate-400 text-[10px]">({item.quantity || item.qty} qty)</span></span>
+                          <span className="font-mono font-bold text-orange-600">₹{(item.price || 0) * (item.quantity || item.qty || 1)}</span>
+                        </div>
+                      ))}
+
+                      <div className="flex justify-between items-center text-xs bg-orange-50/60 p-2 rounded-lg border border-orange-200">
+                        <span className="text-orange-900 font-bold">🛵 Delivery Fee</span>
+                        <span className="font-mono font-bold text-orange-700">₹{ord.deliveryFee || 30}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Footer Payment Info */}
+                  <div className="flex justify-between items-center pt-2 text-[11px] border-t border-orange-100">
+                    <span className="text-slate-500 font-medium">Payment: <strong className="text-slate-900">{ord.paymentMode || 'Online'}</strong> ({ord.paymentStatus || 'Paid'})</span>
+                  </div>
+
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+
+      {/* TAB 2: DELIVERY PARTNER PROFILE & STATS */}
+      {activeTab === 'profile' && (
+        <div className="space-y-4">
+          <div className="bg-white border border-orange-100 p-4 rounded-3xl space-y-3">
+            <h3 className="text-xs font-black uppercase text-slate-700">👤 Delivery Partner Profile</h3>
+            <div className="space-y-2 text-xs text-slate-700 pt-1">
+              <div className="flex justify-between border-b border-orange-50 pb-2">
+                <span className="font-bold text-slate-500">Partner Name:</span>
+                <span className="font-black text-slate-900">{deliveryPartnerName}</span>
+              </div>
+              <div className="flex justify-between border-b border-orange-50 pb-2">
+                <span className="font-bold text-slate-500">Registered Phone:</span>
+                <span className="font-mono text-slate-800">{deliveryPartnerPhone}</span>
+              </div>
+              <div className="flex justify-between border-b border-orange-50 pb-2">
+                <span className="font-bold text-slate-500">Total Accepted Orders:</span>
+                <span className="font-black text-orange-600">{myAcceptedOrders.length + myDeliveredOrders.length}</span>
+              </div>
+              <div className="flex justify-between pb-1">
+                <span className="font-bold text-slate-500">Successfully Delivered:</span>
+                <span className="text-emerald-600 font-black">{myDeliveredOrders.length} Orders</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
