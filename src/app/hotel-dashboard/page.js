@@ -1,6 +1,8 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
+import { initializeApp } from 'firebase/app';
+import { getMessaging, getToken } from 'firebase/messaging';
 
 export default function HotelDashboardPage() {
   const [hotelName, setHotelName] = useState('Partner Hotel');
@@ -167,6 +169,41 @@ export default function HotelDashboardPage() {
 
     // Initial fetch
     fetchDashboardData(storedHotel, true);
+
+    // Register Firebase Push Notifications for Admin Device
+    async function registerFCMToken() {
+      try {
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted') {
+          const firebaseConfig = {
+            apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+            projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+            messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+            appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID
+          };
+          if (firebaseConfig.apiKey) {
+            const app = initializeApp(firebaseConfig);
+            const messaging = getMessaging(app);
+            const token = await getToken(messaging, { 
+              vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY 
+            });
+
+            if (token) {
+              const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://food-cgs4.onrender.com';
+              await fetch(`${API_URL}/api/save-admin-token`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token })
+              });
+              console.log('✅ Admin FCM Token Registered from Hotel Dashboard');
+            }
+          }
+        }
+      } catch (err) {
+        console.log('FCM Token registration skipped or failed:', err);
+      }
+    }
+    registerFCMToken();
 
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://food-cgs4.onrender.com';
 
