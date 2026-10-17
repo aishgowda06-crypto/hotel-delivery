@@ -170,33 +170,49 @@ export default function HotelDashboardPage() {
     // Initial fetch
     fetchDashboardData(storedHotel, true);
 
-    // Register Firebase Push Notifications for Admin Device
+    // Register Firebase Push Notifications for Admin Device (Background & Sleep Ready)
     async function registerFCMToken() {
       try {
         const permission = await Notification.requestPermission();
         if (permission === 'granted') {
           const firebaseConfig = {
-            apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-            projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-            messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-            appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID
+            apiKey: "AIzaSyDxBOa3ciYVdVmfYwyEIF2Rlg3b5QRcNkw",
+            authDomain: "buybrigg-notifications.firebaseapp.com",
+            projectId: "buybrigg-notifications",
+            storageBucket: "buybrigg-notifications.firebasestorage.app",
+            messagingSenderId: "790613462958",
+            appId: "1:790613462958:web:0f8f70123c41935cbb823f",
+            measurementId: "G-Y1HMZ2JV4C"
           };
-          if (firebaseConfig.apiKey) {
-            const app = initializeApp(firebaseConfig);
-            const messaging = getMessaging(app);
-            const token = await getToken(messaging, { 
-              vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY 
-            });
 
-            if (token) {
-              const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://food-cgs4.onrender.com';
-              await fetch(`${API_URL}/api/save-admin-token`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ token })
-              });
-              console.log('✅ Admin FCM Token Registered from Hotel Dashboard');
+          const app = initializeApp(firebaseConfig);
+          const messaging = getMessaging(app);
+
+          // Explicitly register and wait for service worker readiness to prevent subscription abort errors
+          let swRegistration = null;
+          if ('serviceWorker' in navigator) {
+            try {
+              swRegistration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+              swRegistration = await navigator.serviceWorker.ready;
+              console.log('✅ Hotel Service Worker active with scope:', swRegistration.scope);
+            } catch (swErr) {
+              console.warn('Service worker registration error:', swErr);
             }
+          }
+
+          const token = await getToken(messaging, { 
+            vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY || "",
+            serviceWorkerRegistration: swRegistration 
+          });
+
+          if (token) {
+            const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://food-cgs4.onrender.com';
+            await fetch(`${API_URL}/api/save-admin-token`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token })
+            });
+            console.log('✅ Admin FCM Token Registered Successfully from Hotel Dashboard');
           }
         }
       } catch (err) {
