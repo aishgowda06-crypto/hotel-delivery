@@ -36,16 +36,32 @@ export default function DeliveryLiveOrders() {
         const permission = await Notification.requestPermission();
         if (permission === 'granted') {
           const firebaseConfig = {
-            apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "AIzaSyDummyKeyForFallback-BuyBrigg",
+            apiKey: "AIzaSyDxBOa3ciYVdVmfYwyEIF2Rlg3b5QRcNkw",
+            authDomain: "buybrigg-notifications.firebaseapp.com",
             projectId: "buybrigg-notifications",
-            messagingSenderId: "103959432019",
-            appId: "1:103959432019:web:58219bee2922c98d"
+            storageBucket: "buybrigg-notifications.firebasestorage.app",
+            messagingSenderId: "790613462958",
+            appId: "1:790613462958:web:0f8f70123c41935cbb823f",
+            measurementId: "G-Y1HMZ2JV4C"
           };
 
           const app = initializeApp(firebaseConfig);
           const messaging = getMessaging(app);
+
+          // Explicitly register the service worker via navigator to bypass scope 404s
+          let swRegistration = null;
+          if ('serviceWorker' in navigator) {
+            try {
+              swRegistration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+              console.log('✅ Service Worker registered successfully with scope:', swRegistration.scope);
+            } catch (swErr) {
+              console.warn('Service worker registration fallback warning:', swErr);
+            }
+          }
+
           const token = await getToken(messaging, { 
-            vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY || "" 
+            vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY || "",
+            serviceWorkerRegistration: swRegistration 
           });
 
           if (token) {
