@@ -48,14 +48,15 @@ export default function DeliveryLiveOrders() {
           const app = initializeApp(firebaseConfig);
           const messaging = getMessaging(app);
 
-          // Explicitly register the service worker via navigator to bypass scope 404s
+          // Explicitly register and wait for the Service Worker to become active
           let swRegistration = null;
           if ('serviceWorker' in navigator) {
             try {
               swRegistration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
-              console.log('✅ Service Worker registered successfully with scope:', swRegistration.scope);
+              swRegistration = await navigator.serviceWorker.ready;
+              console.log('✅ Service Worker is active and ready with scope:', swRegistration.scope);
             } catch (swErr) {
-              console.warn('Service worker registration fallback warning:', swErr);
+              console.warn('Service worker registration error:', swErr);
             }
           }
 
@@ -71,7 +72,7 @@ export default function DeliveryLiveOrders() {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ token })
             });
-            console.log('✅ Delivery Partner FCM Token Registered Successfully for Background Pushes');
+            console.log('✅ Delivery Partner FCM Token Registered Successfully:', token);
           }
         }
       } catch (err) {
