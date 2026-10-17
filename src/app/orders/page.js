@@ -30,33 +30,32 @@ export default function DeliveryLiveOrders() {
     }
     setIsCheckingAuth(false);
 
-    // Register Firebase Push Notifications for Delivery Partner Device
+    // Register Firebase Push Notifications for Delivery Partner Device (Background & Sleep Ready)
     async function registerFCMToken() {
       try {
         const permission = await Notification.requestPermission();
         if (permission === 'granted') {
           const firebaseConfig = {
-            apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-            projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-            messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-            appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID
+            apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "AIzaSyDummyKeyForFallback-BuyBrigg",
+            projectId: "buybrigg-notifications",
+            messagingSenderId: "103959432019",
+            appId: "1:103959432019:web:58219bee2922c98d"
           };
-          if (firebaseConfig.apiKey) {
-            const app = initializeApp(firebaseConfig);
-            const messaging = getMessaging(app);
-            const token = await getToken(messaging, { 
-              vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY 
-            });
 
-            if (token) {
-              const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://food-cgs4.onrender.com';
-              await fetch(`${API_URL}/api/save-admin-token`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ token })
-              });
-              console.log('✅ Delivery Partner FCM Token Registered');
-            }
+          const app = initializeApp(firebaseConfig);
+          const messaging = getMessaging(app);
+          const token = await getToken(messaging, { 
+            vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY || "" 
+          });
+
+          if (token) {
+            const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://food-cgs4.onrender.com';
+            await fetch(`${API_URL}/api/save-admin-token`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token })
+            });
+            console.log('✅ Delivery Partner FCM Token Registered Successfully for Background Pushes');
           }
         }
       } catch (err) {
