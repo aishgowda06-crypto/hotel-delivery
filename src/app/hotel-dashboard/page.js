@@ -17,18 +17,25 @@ export default function HotelDashboardPage() {
   const [activeTab, setActiveTab] = useState('orders');
   const [notificationSound, setNotificationSound] = useState('bell');
   const [restaurantProfile, setRestaurantProfile] = useState({});
-  const [menuSearchQuery, setMenuSearchQuery] = useState(''); // Added search state for menu items
+  const [menuSearchQuery, setMenuSearchQuery] = useState('');
 
   // Audio looping reference so sound repeats continuously until an order is accepted or rejected
   const audioLoopRef = useRef(null);
 
-  // Play continuous audio alert loop using Web Audio API
+  // Play continuous audio alert loop using Web Audio API with user-interaction unlock handler
   const startAudioLoop = (soundType) => {
     if (audioLoopRef.current) return; // Already playing
 
     try {
       const playTone = () => {
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) return;
+        const audioCtx = new AudioContextClass();
+        
+        if (audioCtx.state === 'suspended') {
+          audioCtx.resume();
+        }
+
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
         
@@ -61,7 +68,14 @@ export default function HotelDashboardPage() {
 
   const playSingleAlert = (soundType) => {
     try {
-      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) return;
+      const audioCtx = new AudioContextClass();
+      
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
       
@@ -162,7 +176,11 @@ export default function HotelDashboardPage() {
   };
 
   useEffect(() => {
-    const storedHotel = localStorage.getItem('shopmatries_hotel_name') || 'Partner Hotel';
+    // Persistent session recovery to prevent repetitive logouts on PWA / Home screen app restarts
+    const storedHotel = localStorage.getItem('shopmatries_hotel_name') || sessionStorage.getItem('shopmatries_hotel_name') || 'Partner Hotel';
+    localStorage.setItem('shopmatries_hotel_name', storedHotel);
+    sessionStorage.setItem('shopmatries_hotel_name', storedHotel);
+
     const storedSound = localStorage.getItem('shopmatries_notification_sound') || 'bell';
     setHotelName(storedHotel);
     setNotificationSound(storedSound);
@@ -170,9 +188,10 @@ export default function HotelDashboardPage() {
     // Initial fetch
     fetchDashboardData(storedHotel, true);
 
-    // Register Firebase Push Notifications for Admin Device (Background & Sleep Ready)
+    // Register Firebase Push Notifications for Admin Device (Background & Sleep Ready for iOS & Android)
     async function registerFCMToken() {
       try {
+        if (!('Notification' in window)) return;
         const permission = await Notification.requestPermission();
         if (permission === 'granted') {
           const firebaseConfig = {
@@ -188,7 +207,7 @@ export default function HotelDashboardPage() {
           const app = initializeApp(firebaseConfig);
           const messaging = getMessaging(app);
 
-          // Explicitly register and wait for service worker readiness to prevent subscription abort errors
+          // Explicitly register and wait for service worker readiness
           let swRegistration = null;
           if ('serviceWorker' in navigator) {
             try {
@@ -210,9 +229,9 @@ export default function HotelDashboardPage() {
             await fetch(`${API_URL}/api/save-admin-token`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ token })
+              body: JSON.stringify({ token, hotelName: storedHotel })
             });
-            console.log('✅ Admin FCM Token Registered Successfully from Hotel Dashboard');
+            console.log('✅ Admin FCM Token Registered Successfully with Hotel Scope');
           }
         }
       } catch (err) {
@@ -223,7 +242,7 @@ export default function HotelDashboardPage() {
 
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://food-cgs4.onrender.com';
 
-    // Socket.io real-time listener with continuous alert loop
+    // Socket.io real-time listener with continuous alert loop & ordered food details check
     const socket = io(API_URL);
     socket.on('new-order', (newOrder) => {
       const rest = newOrder.restaurant || newOrder.hotelName || newOrder.restaurantName || newOrder.hotel || newOrder.brand || '';
@@ -231,10 +250,30 @@ export default function HotelDashboardPage() {
         setOrders(prev => [newOrder, ...prev]);
         const savedSound = localStorage.getItem('shopmatries_notification_sound') || 'bell';
         startAudioLoop(savedSound);
+
+        // Native Web Notification fallback if browser is open in background tab
+        if ('Notification' in window && Notification.permission === 'granted') {
+          const itemSummary = newOrder.items?.map(i => `${i.quantity || 1}x ${i.englishName || i.name || 'Item'}`).join(', ') || 'New Order Items';
+          newNotificationHandler(`🔔 New Order for ${storedHotel}!`, {
+            body: `Items: ${itemSummary}\nTotal: ₹${newOrder.totalAmount || newOrder.totalPrice || 0}`,
+            icon: '/icon.png'
+          });
+        }
       }
     });
 
-    // Live polling interval every 5 seconds so everything updates automatically
+    // Helper for native notifications
+    function newNotificationHandler(title, options) {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.ready.then(reg => {
+          reg.showNotification(title, options);
+        });
+      } else {
+        new Notification(title, options);
+      }
+    }
+
+    // Live polling interval every 5 seconds for robust sync
     const pollInterval = setInterval(() => {
       fetchDashboardData(storedHotel, false);
     }, 5000);
@@ -322,7 +361,17 @@ export default function HotelDashboardPage() {
   );
 
   return (
-    <div className="max-w-md mx-auto space-y-4 pb-10">
+    <div 
+      onClick={() => {
+        // User interaction unlock trigger for mobile browser audio contexts
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (AudioContextClass) {
+          const tempCtx = new AudioContextClass();
+          if (tempCtx.state === 'suspended') tempCtx.resume();
+        }
+      }}
+      className="max-w-md mx-auto space-y-4 pb-10"
+    >
       
       {/* Header & Status Banner */}
       <div className="bg-white border border-orange-100 p-4 rounded-3xl shadow-sm space-y-3">
@@ -427,9 +476,9 @@ export default function HotelDashboardPage() {
 
                   <div className="text-[11px] text-slate-600 space-y-0.5 pt-1 border-t border-orange-100">
                     {order.items?.map((item, i) => (
-                      <div key={i} className="flex justify-between">
+                      <div key={i} className="flex justify-between font-bold">
                         <span>{item.quantity || 1}x {item.englishName || item.itemName || item.dishName || item.foodName || item.title || item.name || item.dish || 'Food Item'}</span>
-                        <span>₹{(item.price || 0) * (item.quantity || 1)}</span>
+                        <span className="text-slate-900">₹{(item.price || 0) * (item.quantity || 1)}</span>
                       </div>
                     ))}
                   </div>
