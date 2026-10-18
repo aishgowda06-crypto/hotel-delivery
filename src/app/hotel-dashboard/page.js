@@ -108,19 +108,18 @@ export default function HotelDashboardPage() {
       fetch(`${API_URL}/api/foods/restaurants`).then(res => res.json()).catch(() => [])
     ])
       .then(([orderData, foodData, restaurantData]) => {
-        // 1. Filter orders for this hotel
+        // 1. Filter orders for this specific hotel dashboard
         const allOrders = Array.isArray(orderData) ? orderData : (orderData.orders || orderData.data || orderData.result || []);
         const filteredOrders = allOrders.filter(o => {
           const rest = o.restaurant || o.hotelName || o.restaurantName || o.hotel || o.brand || '';
           return rest.trim().toLowerCase() === cleanTarget;
         });
 
-        // Check if there are any pending/new incoming orders to trigger the continuous alarm loop & popup modal
+        // Check if there are any pending/new incoming orders to trigger alarm loop & popup modal
         const pendingOrders = filteredOrders.filter(o => !o.status || o.status === 'Pending' || o.status === 'Hub');
         if (pendingOrders.length > 0) {
           const savedSound = localStorage.getItem('shopmatries_notification_sound') || 'bell';
           startAudioLoop(savedSound);
-          // Set the latest incoming pending order for the interactive popup modal
           if (!incomingPopupOrder) {
             setIncomingPopupOrder(pendingOrders[0]);
           }
@@ -184,8 +183,11 @@ export default function HotelDashboardPage() {
   };
 
   useEffect(() => {
-    // Persistent session recovery to prevent repetitive logouts on PWA / Home screen app restarts
-    const storedHotel = localStorage.getItem('shopmatries_hotel_name') || sessionStorage.getItem('shopmatries_hotel_name') || 'Partner Hotel';
+    // Ultra-persistent session recovery to prevent logout when closed or reloaded from PWA home screen
+    let storedHotel = localStorage.getItem('shopmatries_hotel_name') || sessionStorage.getItem('shopmatries_hotel_name');
+    if (!storedHotel) {
+      storedHotel = 'Partner Hotel';
+    }
     localStorage.setItem('shopmatries_hotel_name', storedHotel);
     sessionStorage.setItem('shopmatries_hotel_name', storedHotel);
 
@@ -196,7 +198,7 @@ export default function HotelDashboardPage() {
     // Initial fetch
     fetchDashboardData(storedHotel, true);
 
-    // Register Firebase Push Notifications for Admin Device (Background & Sleep Ready for iOS & Android)
+    // Register Firebase Push Notifications specifically scoped for Hotel Dashboard Admin
     async function registerFCMToken() {
       try {
         if (!('Notification' in window)) return;
@@ -215,13 +217,11 @@ export default function HotelDashboardPage() {
           const app = initializeApp(firebaseConfig);
           const messaging = getMessaging(app);
 
-          // Explicitly register and wait for service worker readiness
           let swRegistration = null;
           if ('serviceWorker' in navigator) {
             try {
               swRegistration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
               swRegistration = await navigator.serviceWorker.ready;
-              console.log('✅ Hotel Service Worker active with scope:', swRegistration.scope);
             } catch (swErr) {
               console.warn('Service worker registration error:', swErr);
             }
@@ -237,9 +237,8 @@ export default function HotelDashboardPage() {
             await fetch(`${API_URL}/api/save-admin-token`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ token, hotelName: storedHotel })
+              body: JSON.stringify({ token, hotelName: storedHotel, role: 'hotel' })
             });
-            console.log('✅ Admin FCM Token Registered Successfully with Hotel Scope');
           }
         }
       } catch (err) {
@@ -250,29 +249,29 @@ export default function HotelDashboardPage() {
 
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://food-cgs4.onrender.com';
 
-    // Socket.io real-time listener with continuous alert loop & detailed ordered food items in notifications
+    // Socket.io real-time listener for hotel orders with accurate item summaries
     const socket = io(API_URL);
     socket.on('new-order', (newOrder) => {
       const rest = newOrder.restaurant || newOrder.hotelName || newOrder.restaurantName || newOrder.hotel || newOrder.brand || '';
       if (rest.trim().toLowerCase() === storedHotel.trim().toLowerCase()) {
         setOrders(prev => [newOrder, ...prev]);
-        setIncomingPopupOrder(newOrder); // trigger accept/reject modal popup immediately
+        setIncomingPopupOrder(newOrder); 
         const savedSound = localStorage.getItem('shopmatries_notification_sound') || 'bell';
         startAudioLoop(savedSound);
 
-        // Native Web Notification with detailed item name and quantities
+        // Native Web Notification showing exact Order ID, food item names, and quantities
         if ('Notification' in window && Notification.permission === 'granted') {
-          const itemSummary = newOrder.items?.map(i => `${i.quantity || i.qty || 1}x ${i.englishName || i.itemName || i.dishName || i.name || 'Item'}`).join(', ') || 'New Order Items';
-          const orderIdShort = newOrder._id ? newOrder._id.slice(-6) : 'New';
+          const orderIdShort = (newOrder._id || newOrder.id || 'NEW').slice(-6);
+          const itemSummary = newOrder.items?.map(i => `${i.quantity || i.qty || 1}x ${i.englishName || i.itemName || i.dishName || i.name || 'Food Item'}`).join(', ') || 'New Food Item';
+          
           newNotificationHandler(`🔔 New Order #${orderIdShort} (${storedHotel})`, {
-            body: `Customer: ${newOrder.customerName || 'Guest'}\nItems: ${itemSummary}\nTotal: ₹${newOrder.totalAmount || newOrder.totalPrice || 0}`,
+            body: `Items: ${itemSummary}\nTotal: ₹${newOrder.totalAmount || newOrder.totalPrice || 0}`,
             icon: '/icon.png'
           });
         }
       }
     });
 
-    // Helper for native notifications
     function newNotificationHandler(title, options) {
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.ready.then(reg => {
@@ -283,7 +282,6 @@ export default function HotelDashboardPage() {
       }
     }
 
-    // Live polling interval every 5 seconds for robust sync
     const pollInterval = setInterval(() => {
       fetchDashboardData(storedHotel, false);
     }, 5000);
@@ -322,12 +320,10 @@ export default function HotelDashboardPage() {
         body: JSON.stringify({ status: newStatus })
       });
       
-      // Stop continuous sound loop since the order has now been addressed (Accepted/Rejected)
       stopAudioLoop();
-      setIncomingPopupOrder(null); // Dismiss popup modal
+      setIncomingPopupOrder(null); 
 
-      // Optimistic state update
-      setOrders(prev => prev.map(o => o._id === orderId ? { ...o, status: newStatus } : o));
+      setOrders(prev => prev.map(o => (o._id === orderId || o.id === orderId) ? { ...o, status: newStatus } : o));
     } catch (err) {
       console.error('Failed to update order status:', err);
     }
@@ -366,7 +362,6 @@ export default function HotelDashboardPage() {
     );
   }
 
-  // Filter menu items based on search input
   const filteredMenuItems = menuItems.filter(item =>
     item.name.toLowerCase().includes(menuSearchQuery.toLowerCase())
   );
@@ -374,7 +369,6 @@ export default function HotelDashboardPage() {
   return (
     <div 
       onClick={() => {
-        // User interaction unlock trigger for mobile browser audio contexts
         const AudioContextClass = window.AudioContext || window.webkitAudioContext;
         if (AudioContextClass) {
           const tempCtx = new AudioContextClass();
@@ -384,7 +378,7 @@ export default function HotelDashboardPage() {
       className="max-w-md mx-auto space-y-4 pb-10 relative"
     >
       
-      {/* INCOMING ORDER POPUP ALERT MODAL */}
+      {/* INCOMING ORDER POPUP ALERT MODAL WITH ACCURATE ITEMS & QUANTITIES */}
       {incomingPopupOrder && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn">
           <div className="bg-white border-2 border-orange-500 rounded-3xl p-5 max-w-sm w-full space-y-4 shadow-2xl text-center">
@@ -396,7 +390,7 @@ export default function HotelDashboardPage() {
                 New Order Received!
               </span>
               <h3 className="text-base font-black text-slate-950 mt-1">
-                Order #{incomingPopupOrder._id ? incomingPopupOrder._id.slice(-6) : 'New'}
+                Order #{(incomingPopupOrder._id || incomingPopupOrder.id || '').slice(-6)}
               </h3>
               <p className="text-[11px] text-slate-500 font-bold mt-0.5">
                 Customer: {incomingPopupOrder.customerName || 'Guest'} ({incomingPopupOrder.phone || 'No Phone'})
@@ -406,7 +400,6 @@ export default function HotelDashboardPage() {
               </p>
             </div>
 
-            {/* Ordered Items List with Quantities */}
             <div className="bg-orange-50/70 border border-orange-200 rounded-2xl p-3 text-left space-y-1.5 max-h-40 overflow-y-auto">
               <p className="text-[10px] font-black uppercase text-orange-800 border-b border-orange-200 pb-1">Ordered Items & Quantities</p>
               {incomingPopupOrder.items?.map((item, idx) => (
@@ -421,16 +414,15 @@ export default function HotelDashboardPage() {
               </div>
             </div>
 
-            {/* Accept or Reject Popup Actions */}
             <div className="grid grid-cols-2 gap-2 pt-2">
               <button
-                onClick={() => updateOrderStatus(incomingPopupOrder._id, 'Preparing')}
+                onClick={() => updateOrderStatus(incomingPopupOrder._id || incomingPopupOrder.id, 'Preparing')}
                 className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs py-3.5 rounded-xl shadow-lg transition cursor-pointer active:scale-95"
               >
                 ✅ Accept & Prepare
               </button>
               <button
-                onClick={() => updateOrderStatus(incomingPopupOrder._id, 'Rejected')}
+                onClick={() => updateOrderStatus(incomingPopupOrder._id || incomingPopupOrder.id, 'Rejected')}
                 className="w-full bg-rose-500 hover:bg-rose-600 text-white font-black text-xs py-3.5 rounded-xl shadow-lg transition cursor-pointer active:scale-95"
               >
                 ❌ Reject Order
@@ -458,7 +450,7 @@ export default function HotelDashboardPage() {
 
       {error && <div className="bg-orange-50 text-orange-700 text-xs font-bold p-3 rounded-xl border border-orange-200 text-center">{error}</div>}
 
-      {/* Tab Navigation Bar (Integrated cleanly in page body) */}
+      {/* Tab Navigation Bar */}
       <div className="flex bg-orange-50/80 p-1 rounded-2xl border border-orange-100">
         <button
           onClick={() => setActiveTab('orders')}
@@ -499,36 +491,34 @@ export default function HotelDashboardPage() {
               const currentProgress = order.progress !== undefined ? order.progress : 0;
               const currentStatusText = order.status || (currentProgress === 100 ? 'Delivered' : currentProgress === 70 ? 'Near Area' : currentProgress === 35 ? 'Picked' : 'Hub');
               const assignedRider = order.acceptedBy || order.riderName || order.deliveryPartner || null;
-              const orderId = order._id || `order-${idx}`;
+              const orderId = order._id || order.id || `order-${idx}`;
               const orderTimeStr = order.createdAt ? new Date(order.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : 'Just now';
 
               return (
                 <div key={orderId} className="bg-white border border-orange-100 rounded-2xl p-3.5 space-y-3 shadow-xs">
                   <div className="flex justify-between items-center text-xs font-black">
                     <div>
-                      <span className="text-slate-900">Order #{order._id ? order._id.slice(-6) : (idx + 1)}</span>
+                      <span className="text-slate-900">Order #{orderId.slice(-6)}</span>
                       <p className="text-[10px] text-slate-400 font-mono font-normal">Placed at: {orderTimeStr}</p>
                     </div>
                     <span className="text-orange-600 bg-orange-50 px-2 py-0.5 rounded-md font-mono">₹{order.totalAmount || order.total || order.totalPrice || 0}</span>
                   </div>
 
-                  {/* Accept / Reject Action Buttons for Preparation Confirmation */}
                   <div className="flex gap-2 pt-1">
                     <button
-                      onClick={() => updateOrderStatus(order._id, 'Preparing')}
+                      onClick={() => updateOrderStatus(orderId, 'Preparing')}
                       className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white py-1.5 rounded-xl text-[10px] font-black shadow-sm transition cursor-pointer"
                     >
                       ✅ Accept & Prepare
                     </button>
                     <button
-                      onClick={() => updateOrderStatus(order._id, 'Rejected')}
+                      onClick={() => updateOrderStatus(orderId, 'Rejected')}
                       className="flex-1 bg-rose-500 hover:bg-rose-600 text-white py-1.5 rounded-xl text-[10px] font-black shadow-sm transition cursor-pointer"
                     >
                       ❌ Reject
                     </button>
                   </div>
 
-                  {/* Live Checkpoint Progress Status */}
                   <div className="bg-orange-50/70 border border-orange-200 p-2.5 rounded-xl space-y-1">
                     <div className="flex justify-between items-center text-[10px] font-black">
                       <span className="text-slate-700 uppercase">Live Delivery: <span className="text-orange-600">{currentStatusText}</span></span>
@@ -548,7 +538,7 @@ export default function HotelDashboardPage() {
                   <div className="text-[11px] text-slate-600 space-y-0.5 pt-1 border-t border-orange-100">
                     {order.items?.map((item, i) => (
                       <div key={i} className="flex justify-between font-bold">
-                        <span>{item.quantity || item.qty || 1}x {item.englishName || item.itemName || item.dishName || item.foodName || item.title || item.name || item.dish || 'Food Item'}</span>
+                        <span>{item.quantity || item.qty || 1}x {item.englishName || item.itemName || item.dishName || item.name || 'Food Item'}</span>
                         <span className="text-slate-900">₹{(item.price || 0) * (item.quantity || item.qty || 1)}</span>
                       </div>
                     ))}
@@ -588,7 +578,6 @@ export default function HotelDashboardPage() {
             <h3 className="text-xs font-black uppercase text-slate-700">🍱 Menu Item Availability Controls</h3>
           </div>
 
-          {/* Search bar for menu items */}
           <div className="relative">
             <input
               type="text"
