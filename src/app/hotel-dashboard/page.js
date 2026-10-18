@@ -19,6 +19,9 @@ export default function HotelDashboardPage() {
   const [restaurantProfile, setRestaurantProfile] = useState({});
   const [menuSearchQuery, setMenuSearchQuery] = useState('');
 
+  // Incoming order popup modal state
+  const [incomingPopupOrder, setIncomingPopupOrder] = useState(null);
+
   // Audio looping reference so sound repeats continuously until an order is accepted or rejected
   const audioLoopRef = useRef(null);
 
@@ -112,13 +115,18 @@ export default function HotelDashboardPage() {
           return rest.trim().toLowerCase() === cleanTarget;
         });
 
-        // Check if there are any pending/new incoming orders to trigger the continuous alarm loop
-        const hasPendingOrders = filteredOrders.some(o => !o.status || o.status === 'Pending' || o.status === 'Hub');
-        if (hasPendingOrders) {
+        // Check if there are any pending/new incoming orders to trigger the continuous alarm loop & popup modal
+        const pendingOrders = filteredOrders.filter(o => !o.status || o.status === 'Pending' || o.status === 'Hub');
+        if (pendingOrders.length > 0) {
           const savedSound = localStorage.getItem('shopmatries_notification_sound') || 'bell';
           startAudioLoop(savedSound);
+          // Set the latest incoming pending order for the interactive popup modal
+          if (!incomingPopupOrder) {
+            setIncomingPopupOrder(pendingOrders[0]);
+          }
         } else {
           stopAudioLoop();
+          setIncomingPopupOrder(null);
         }
 
         setOrders(filteredOrders);
@@ -242,20 +250,22 @@ export default function HotelDashboardPage() {
 
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://food-cgs4.onrender.com';
 
-    // Socket.io real-time listener with continuous alert loop & ordered food details check
+    // Socket.io real-time listener with continuous alert loop & detailed ordered food items in notifications
     const socket = io(API_URL);
     socket.on('new-order', (newOrder) => {
       const rest = newOrder.restaurant || newOrder.hotelName || newOrder.restaurantName || newOrder.hotel || newOrder.brand || '';
       if (rest.trim().toLowerCase() === storedHotel.trim().toLowerCase()) {
         setOrders(prev => [newOrder, ...prev]);
+        setIncomingPopupOrder(newOrder); // trigger accept/reject modal popup immediately
         const savedSound = localStorage.getItem('shopmatries_notification_sound') || 'bell';
         startAudioLoop(savedSound);
 
-        // Native Web Notification fallback if browser is open in background tab
+        // Native Web Notification with detailed item name and quantities
         if ('Notification' in window && Notification.permission === 'granted') {
-          const itemSummary = newOrder.items?.map(i => `${i.quantity || 1}x ${i.englishName || i.name || 'Item'}`).join(', ') || 'New Order Items';
-          newNotificationHandler(`🔔 New Order for ${storedHotel}!`, {
-            body: `Items: ${itemSummary}\nTotal: ₹${newOrder.totalAmount || newOrder.totalPrice || 0}`,
+          const itemSummary = newOrder.items?.map(i => `${i.quantity || i.qty || 1}x ${i.englishName || i.itemName || i.dishName || i.name || 'Item'}`).join(', ') || 'New Order Items';
+          const orderIdShort = newOrder._id ? newOrder._id.slice(-6) : 'New';
+          newNotificationHandler(`🔔 New Order #${orderIdShort} (${storedHotel})`, {
+            body: `Customer: ${newOrder.customerName || 'Guest'}\nItems: ${itemSummary}\nTotal: ₹${newOrder.totalAmount || newOrder.totalPrice || 0}`,
             icon: '/icon.png'
           });
         }
@@ -314,6 +324,7 @@ export default function HotelDashboardPage() {
       
       // Stop continuous sound loop since the order has now been addressed (Accepted/Rejected)
       stopAudioLoop();
+      setIncomingPopupOrder(null); // Dismiss popup modal
 
       // Optimistic state update
       setOrders(prev => prev.map(o => o._id === orderId ? { ...o, status: newStatus } : o));
@@ -370,9 +381,65 @@ export default function HotelDashboardPage() {
           if (tempCtx.state === 'suspended') tempCtx.resume();
         }
       }}
-      className="max-w-md mx-auto space-y-4 pb-10"
+      className="max-w-md mx-auto space-y-4 pb-10 relative"
     >
       
+      {/* INCOMING ORDER POPUP ALERT MODAL */}
+      {incomingPopupOrder && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white border-2 border-orange-500 rounded-3xl p-5 max-w-sm w-full space-y-4 shadow-2xl text-center">
+            <div className="w-14 h-14 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center mx-auto text-2xl font-black animate-bounce shadow-inner">
+              🔔
+            </div>
+            <div>
+              <span className="text-[10px] font-black uppercase text-red-600 bg-red-50 px-2 py-0.5 rounded-full border border-red-200">
+                New Order Received!
+              </span>
+              <h3 className="text-base font-black text-slate-950 mt-1">
+                Order #{incomingPopupOrder._id ? incomingPopupOrder._id.slice(-6) : 'New'}
+              </h3>
+              <p className="text-[11px] text-slate-500 font-bold mt-0.5">
+                Customer: {incomingPopupOrder.customerName || 'Guest'} ({incomingPopupOrder.phone || 'No Phone'})
+              </p>
+              <p className="text-[10px] text-slate-400 font-mono mt-0.5">
+                Placed At: {incomingPopupOrder.createdAt ? new Date(incomingPopupOrder.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : 'Just now'}
+              </p>
+            </div>
+
+            {/* Ordered Items List with Quantities */}
+            <div className="bg-orange-50/70 border border-orange-200 rounded-2xl p-3 text-left space-y-1.5 max-h-40 overflow-y-auto">
+              <p className="text-[10px] font-black uppercase text-orange-800 border-b border-orange-200 pb-1">Ordered Items & Quantities</p>
+              {incomingPopupOrder.items?.map((item, idx) => (
+                <div key={idx} className="flex justify-between items-center text-xs text-slate-800 font-bold">
+                  <span>{item.quantity || item.qty || 1}x {item.englishName || item.itemName || item.dishName || item.name || 'Food Item'}</span>
+                  <span className="font-mono text-orange-600">₹{(item.price || 0) * (item.quantity || item.qty || 1)}</span>
+                </div>
+              ))}
+              <div className="pt-2 border-t border-orange-200 flex justify-between items-center text-xs font-black">
+                <span className="text-slate-900">Total Payable:</span>
+                <span className="text-orange-600 font-mono">₹{incomingPopupOrder.totalAmount || incomingPopupOrder.totalPrice || 0}</span>
+              </div>
+            </div>
+
+            {/* Accept or Reject Popup Actions */}
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <button
+                onClick={() => updateOrderStatus(incomingPopupOrder._id, 'Preparing')}
+                className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs py-3.5 rounded-xl shadow-lg transition cursor-pointer active:scale-95"
+              >
+                ✅ Accept & Prepare
+              </button>
+              <button
+                onClick={() => updateOrderStatus(incomingPopupOrder._id, 'Rejected')}
+                className="w-full bg-rose-500 hover:bg-rose-600 text-white font-black text-xs py-3.5 rounded-xl shadow-lg transition cursor-pointer active:scale-95"
+              >
+                ❌ Reject Order
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header & Status Banner */}
       <div className="bg-white border border-orange-100 p-4 rounded-3xl shadow-sm space-y-3">
         <div className="flex justify-between items-center">
@@ -433,11 +500,15 @@ export default function HotelDashboardPage() {
               const currentStatusText = order.status || (currentProgress === 100 ? 'Delivered' : currentProgress === 70 ? 'Near Area' : currentProgress === 35 ? 'Picked' : 'Hub');
               const assignedRider = order.acceptedBy || order.riderName || order.deliveryPartner || null;
               const orderId = order._id || `order-${idx}`;
+              const orderTimeStr = order.createdAt ? new Date(order.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : 'Just now';
 
               return (
                 <div key={orderId} className="bg-white border border-orange-100 rounded-2xl p-3.5 space-y-3 shadow-xs">
                   <div className="flex justify-between items-center text-xs font-black">
-                    <span className="text-slate-900">Order #{order._id ? order._id.slice(-6) : (idx + 1)}</span>
+                    <div>
+                      <span className="text-slate-900">Order #{order._id ? order._id.slice(-6) : (idx + 1)}</span>
+                      <p className="text-[10px] text-slate-400 font-mono font-normal">Placed at: {orderTimeStr}</p>
+                    </div>
                     <span className="text-orange-600 bg-orange-50 px-2 py-0.5 rounded-md font-mono">₹{order.totalAmount || order.total || order.totalPrice || 0}</span>
                   </div>
 
@@ -477,8 +548,8 @@ export default function HotelDashboardPage() {
                   <div className="text-[11px] text-slate-600 space-y-0.5 pt-1 border-t border-orange-100">
                     {order.items?.map((item, i) => (
                       <div key={i} className="flex justify-between font-bold">
-                        <span>{item.quantity || 1}x {item.englishName || item.itemName || item.dishName || item.foodName || item.title || item.name || item.dish || 'Food Item'}</span>
-                        <span className="text-slate-900">₹{(item.price || 0) * (item.quantity || 1)}</span>
+                        <span>{item.quantity || item.qty || 1}x {item.englishName || item.itemName || item.dishName || item.foodName || item.title || item.name || item.dish || 'Food Item'}</span>
+                        <span className="text-slate-900">₹{(item.price || 0) * (item.quantity || item.qty || 1)}</span>
                       </div>
                     ))}
                   </div>
