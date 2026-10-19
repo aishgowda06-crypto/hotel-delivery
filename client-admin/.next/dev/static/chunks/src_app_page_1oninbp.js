@@ -26,6 +26,7 @@ function UniversalPartnerHub() {
     const [hotelSelectionType, setHotelSelectionType] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])('restaurant'); // 'restaurant' or 'brand'
     const [selectedHotel, setSelectedHotel] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])('');
     const [selectedBrand, setSelectedBrand] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])('');
+    const [hotelSearchQuery, setHotelSearchQuery] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])('');
     // Delivery specific states
     const [deliveryName, setDeliveryName] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])('');
     // Backend Data Lists
@@ -34,6 +35,23 @@ function UniversalPartnerHub() {
     const [loadingBackend, setLoadingBackend] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])(true);
     const [error, setError] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])('');
     const [loading, setLoading] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])(false);
+    // Auto-redirect if already logged in (Fixes logout issue when clearing recents)
+    (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useEffect"])({
+        "UniversalPartnerHub.useEffect": ()=>{
+            const token = localStorage.getItem('shopmatries_token');
+            const isHotelOwner = localStorage.getItem('shopmatries_is_hotel_owner');
+            const isDeliveryPartner = localStorage.getItem('shopmatries_is_delivery_partner');
+            if (token) {
+                if (isHotelOwner === 'true') {
+                    router.push('/hotel-dashboard');
+                } else if (isDeliveryPartner === 'true') {
+                    router.push('/orders');
+                }
+            }
+        }
+    }["UniversalPartnerHub.useEffect"], [
+        router
+    ]);
     // Fetch live restaurants from /api/foods/restaurants and brands from /api/brands
     (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useEffect"])({
         "UniversalPartnerHub.useEffect": ()=>{
@@ -82,7 +100,7 @@ function UniversalPartnerHub() {
             return;
         }
         const API_URL = __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$build$2f$polyfills$2f$process$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["default"].env.NEXT_PUBLIC_API_URL || 'https://food-cgs4.onrender.com';
-        // Target the newly separated hotel and delivery route endpoints
+        // Target the separated hotel and delivery route endpoints
         const rolePrefix = partnerType === 'hotel' ? 'hotel' : 'delivery';
         const actionPath = isLoginMode ? 'login' : 'register';
         const endpoint = `${API_URL}/api/auth/${rolePrefix}/${actionPath}`;
@@ -91,22 +109,26 @@ function UniversalPartnerHub() {
             password
         };
         if (partnerType === 'hotel') {
-            const activeHotel = hotelSelectionType === 'restaurant' ? selectedHotel : selectedBrand;
-            if (!activeHotel) {
-                setError('Please select a hotel or brand from the list.');
-                setLoading(false);
-                return;
+            if (!isLoginMode) {
+                const activeHotel = hotelSelectionType === 'restaurant' ? selectedHotel : selectedBrand;
+                if (!activeHotel) {
+                    setError('Please select a hotel or brand from the list.');
+                    setLoading(false);
+                    return;
+                }
+                payload = {
+                    phone,
+                    password,
+                    hotelName: hotelSelectionType === 'restaurant' ? selectedHotel : selectedBrand,
+                    restaurant: hotelSelectionType === 'restaurant' ? selectedHotel : 'General',
+                    brand: hotelSelectionType === 'brand' ? selectedBrand : 'General'
+                };
+            } else {
+                payload = {
+                    phone,
+                    password
+                };
             }
-            payload = isLoginMode ? {
-                phone,
-                password
-            } : {
-                phone,
-                password,
-                hotelName: hotelSelectionType === 'restaurant' ? selectedHotel : 'Partner Hotel',
-                restaurant: hotelSelectionType === 'restaurant' ? selectedHotel : 'Partner Hotel',
-                brand: hotelSelectionType === 'brand' ? selectedBrand : 'General'
-            };
         } else {
             if (!isLoginMode && !deliveryName.trim()) {
                 setError('Please enter your full name.');
@@ -136,8 +158,32 @@ function UniversalPartnerHub() {
                 localStorage.setItem('shopmatries_phone', phone);
                 if (partnerType === 'hotel') {
                     localStorage.setItem('shopmatries_is_hotel_owner', 'true');
-                    const finalHotelName = data.hotelName || data.restaurant || selectedHotel || selectedBrand || 'Partner Hotel';
-                    localStorage.setItem('shopmatries_hotel_name', finalHotelName);
+                    // Accurately map hotel name or brand name, preventing fallback mismatches
+                    let finalName = data.hotelName || data.restaurant || data.brand || data.user?.hotelName || data.user?.brand;
+                    if (!finalName || finalName === 'Partner Hotel') {
+                        if (!isLoginMode) {
+                            finalName = hotelSelectionType === 'brand' ? selectedBrand : selectedHotel;
+                        } else {
+                            try {
+                                const [restRes, brandRes] = await Promise.all([
+                                    fetch(`${API_URL}/api/foods/restaurants`).then((r)=>r.json()).catch(()=>[]),
+                                    fetch(`${API_URL}/api/brands`).then((r)=>r.json()).catch(()=>[])
+                                ]);
+                                const rList = Array.isArray(restRes) ? restRes : restRes.restaurants || restRes.data || [];
+                                const bList = Array.isArray(brandRes) ? brandRes : brandRes.brands || brandRes.data || [];
+                                const matchedRest = rList.find((r)=>r.phone === phone || r.contact === phone);
+                                const matchedBrand = bList.find((b)=>b.phone === phone || b.contact === phone);
+                                if (matchedBrand) {
+                                    finalName = matchedBrand.name || matchedBrand.brandName;
+                                } else if (matchedRest) {
+                                    finalName = matchedRest.hotelName || matchedRest.name || matchedRest.restaurantName;
+                                } else {
+                                    finalName = rList[0]?.hotelName || bList[0]?.name || 'Partner Hotel';
+                                }
+                            } catch (err) {}
+                        }
+                    }
+                    localStorage.setItem('shopmatries_hotel_name', finalName || 'Partner Hotel');
                     router.push('/hotel-dashboard');
                 } else {
                     localStorage.setItem('shopmatries_is_delivery_partner', 'true');
@@ -155,6 +201,9 @@ function UniversalPartnerHub() {
             setLoading(false);
         }
     };
+    // Filtered lists for search feature during registration
+    const filteredRestaurants = backendRestaurants.filter((r)=>r.toLowerCase().includes(hotelSearchQuery.toLowerCase()));
+    const filteredBrands = backendBrands.filter((b)=>b.toLowerCase().includes(hotelSearchQuery.toLowerCase()));
     return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
         className: "max-w-md mx-auto pt-4 space-y-4",
         children: [
@@ -166,15 +215,15 @@ function UniversalPartnerHub() {
                         children: "⚡"
                     }, void 0, false, {
                         fileName: "[project]/src/app/page.js",
-                        lineNumber: 141,
+                        lineNumber: 192,
                         columnNumber: 9
                     }, this),
                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("h1", {
                         className: "text-lg font-black text-slate-950",
-                        children: "Shop Matries Partner Hub"
+                        children: "Buy Brigg Hub"
                     }, void 0, false, {
                         fileName: "[project]/src/app/page.js",
-                        lineNumber: 142,
+                        lineNumber: 193,
                         columnNumber: 9
                     }, this),
                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
@@ -182,13 +231,13 @@ function UniversalPartnerHub() {
                         children: "Universal portal for hotel owners & delivery riders"
                     }, void 0, false, {
                         fileName: "[project]/src/app/page.js",
-                        lineNumber: 143,
+                        lineNumber: 194,
                         columnNumber: 9
                     }, this)
                 ]
             }, void 0, true, {
                 fileName: "[project]/src/app/page.js",
-                lineNumber: 140,
+                lineNumber: 191,
                 columnNumber: 7
             }, this),
             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -204,7 +253,7 @@ function UniversalPartnerHub() {
                         children: "🏨 Hotel Partner"
                     }, void 0, false, {
                         fileName: "[project]/src/app/page.js",
-                        lineNumber: 148,
+                        lineNumber: 199,
                         columnNumber: 9
                     }, this),
                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
@@ -217,13 +266,13 @@ function UniversalPartnerHub() {
                         children: "🛵 Delivery Partner"
                     }, void 0, false, {
                         fileName: "[project]/src/app/page.js",
-                        lineNumber: 155,
+                        lineNumber: 206,
                         columnNumber: 9
                     }, this)
                 ]
             }, void 0, true, {
                 fileName: "[project]/src/app/page.js",
-                lineNumber: 147,
+                lineNumber: 198,
                 columnNumber: 7
             }, this),
             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -239,7 +288,7 @@ function UniversalPartnerHub() {
                         children: "🔑 Sign In"
                     }, void 0, false, {
                         fileName: "[project]/src/app/page.js",
-                        lineNumber: 166,
+                        lineNumber: 217,
                         columnNumber: 9
                     }, this),
                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
@@ -252,48 +301,54 @@ function UniversalPartnerHub() {
                         children: "🚀 Register"
                     }, void 0, false, {
                         fileName: "[project]/src/app/page.js",
-                        lineNumber: 173,
+                        lineNumber: 224,
                         columnNumber: 9
                     }, this)
                 ]
             }, void 0, true, {
                 fileName: "[project]/src/app/page.js",
-                lineNumber: 165,
+                lineNumber: 216,
                 columnNumber: 7
             }, this),
             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("form", {
                 onSubmit: handleSubmit,
                 className: "bg-white border border-orange-100 rounded-[26px] p-4 shadow-sm space-y-3",
                 children: [
-                    partnerType === 'hotel' && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["Fragment"], {
+                    partnerType === 'hotel' && !isLoginMode && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["Fragment"], {
                         children: [
                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
                                 className: "grid grid-cols-2 gap-1 bg-orange-50 p-1 rounded-xl border border-orange-100",
                                 children: [
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
                                         type: "button",
-                                        onClick: ()=>setHotelSelectionType('restaurant'),
+                                        onClick: ()=>{
+                                            setHotelSelectionType('restaurant');
+                                            setHotelSearchQuery('');
+                                        },
                                         className: `py-1.5 text-[10px] font-bold rounded-lg transition ${hotelSelectionType === 'restaurant' ? 'bg-orange-500 text-white shadow-sm' : 'text-slate-600'}`,
                                         children: "🏨 Hotels"
                                     }, void 0, false, {
                                         fileName: "[project]/src/app/page.js",
-                                        lineNumber: 189,
+                                        lineNumber: 240,
                                         columnNumber: 15
                                     }, this),
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
                                         type: "button",
-                                        onClick: ()=>setHotelSelectionType('brand'),
+                                        onClick: ()=>{
+                                            setHotelSelectionType('brand');
+                                            setHotelSearchQuery('');
+                                        },
                                         className: `py-1.5 text-[10px] font-bold rounded-lg transition ${hotelSelectionType === 'brand' ? 'bg-orange-500 text-white shadow-sm' : 'text-slate-600'}`,
                                         children: "🏷️ Brands"
                                     }, void 0, false, {
                                         fileName: "[project]/src/app/page.js",
-                                        lineNumber: 196,
+                                        lineNumber: 247,
                                         columnNumber: 15
                                     }, this)
                                 ]
                             }, void 0, true, {
                                 fileName: "[project]/src/app/page.js",
-                                lineNumber: 188,
+                                lineNumber: 239,
                                 columnNumber: 13
                             }, this),
                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -301,10 +356,21 @@ function UniversalPartnerHub() {
                                 children: [
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("label", {
                                         className: "text-[10px] font-black text-slate-600 uppercase",
-                                        children: hotelSelectionType === 'restaurant' ? 'Select Hotel / Restaurant' : 'Select Brand'
+                                        children: hotelSelectionType === 'restaurant' ? 'Search & Select Hotel / Restaurant' : 'Search & Select Brand'
                                     }, void 0, false, {
                                         fileName: "[project]/src/app/page.js",
-                                        lineNumber: 206,
+                                        lineNumber: 257,
+                                        columnNumber: 15
+                                    }, this),
+                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("input", {
+                                        type: "text",
+                                        placeholder: "Type to search...",
+                                        value: hotelSearchQuery,
+                                        onChange: (e)=>setHotelSearchQuery(e.target.value),
+                                        className: "w-full bg-orange-50/20 border border-orange-200 text-slate-900 text-xs rounded-xl py-2 px-3 font-medium focus:outline-none focus:border-orange-500 mb-1"
+                                    }, void 0, false, {
+                                        fileName: "[project]/src/app/page.js",
+                                        lineNumber: 262,
                                         columnNumber: 15
                                     }, this),
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("select", {
@@ -320,16 +386,16 @@ function UniversalPartnerHub() {
                                             children: "Loading from backend..."
                                         }, void 0, false, {
                                             fileName: "[project]/src/app/page.js",
-                                            lineNumber: 219,
+                                            lineNumber: 280,
                                             columnNumber: 19
-                                        }, this) : hotelSelectionType === 'restaurant' ? backendRestaurants.length === 0 ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("option", {
+                                        }, this) : hotelSelectionType === 'restaurant' ? filteredRestaurants.length === 0 ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("option", {
                                             value: "",
-                                            children: "No hotels found"
+                                            children: "No matching hotels found"
                                         }, void 0, false, {
                                             fileName: "[project]/src/app/page.js",
-                                            lineNumber: 222,
+                                            lineNumber: 283,
                                             columnNumber: 21
-                                        }, this) : backendRestaurants.map((r, i)=>/*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("option", {
+                                        }, this) : filteredRestaurants.map((r, i)=>/*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("option", {
                                                 value: r,
                                                 children: [
                                                     "🏨 ",
@@ -337,16 +403,16 @@ function UniversalPartnerHub() {
                                                 ]
                                             }, i, true, {
                                                 fileName: "[project]/src/app/page.js",
-                                                lineNumber: 224,
-                                                columnNumber: 54
-                                            }, this)) : backendBrands.length === 0 ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("option", {
+                                                lineNumber: 285,
+                                                columnNumber: 55
+                                            }, this)) : filteredBrands.length === 0 ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("option", {
                                             value: "",
-                                            children: "No brands found"
+                                            children: "No matching brands found"
                                         }, void 0, false, {
                                             fileName: "[project]/src/app/page.js",
-                                            lineNumber: 228,
+                                            lineNumber: 289,
                                             columnNumber: 21
-                                        }, this) : backendBrands.map((b, i)=>/*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("option", {
+                                        }, this) : filteredBrands.map((b, i)=>/*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("option", {
                                                 value: b,
                                                 children: [
                                                     "🏷️ ",
@@ -354,24 +420,24 @@ function UniversalPartnerHub() {
                                                 ]
                                             }, i, true, {
                                                 fileName: "[project]/src/app/page.js",
-                                                lineNumber: 230,
-                                                columnNumber: 49
+                                                lineNumber: 291,
+                                                columnNumber: 50
                                             }, this))
                                     }, void 0, false, {
                                         fileName: "[project]/src/app/page.js",
-                                        lineNumber: 209,
+                                        lineNumber: 270,
                                         columnNumber: 15
                                     }, this)
                                 ]
                             }, void 0, true, {
                                 fileName: "[project]/src/app/page.js",
-                                lineNumber: 205,
+                                lineNumber: 256,
                                 columnNumber: 13
                             }, this)
                         ]
                     }, void 0, true, {
                         fileName: "[project]/src/app/page.js",
-                        lineNumber: 187,
+                        lineNumber: 238,
                         columnNumber: 11
                     }, this),
                     partnerType === 'delivery' && !isLoginMode && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -382,7 +448,7 @@ function UniversalPartnerHub() {
                                 children: "Your Full Name"
                             }, void 0, false, {
                                 fileName: "[project]/src/app/page.js",
-                                lineNumber: 241,
+                                lineNumber: 302,
                                 columnNumber: 13
                             }, this),
                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("input", {
@@ -394,13 +460,13 @@ function UniversalPartnerHub() {
                                 required: true
                             }, void 0, false, {
                                 fileName: "[project]/src/app/page.js",
-                                lineNumber: 242,
+                                lineNumber: 303,
                                 columnNumber: 13
                             }, this)
                         ]
                     }, void 0, true, {
                         fileName: "[project]/src/app/page.js",
-                        lineNumber: 240,
+                        lineNumber: 301,
                         columnNumber: 11
                     }, this),
                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -411,7 +477,7 @@ function UniversalPartnerHub() {
                                 children: "10-Digit Mobile Number"
                             }, void 0, false, {
                                 fileName: "[project]/src/app/page.js",
-                                lineNumber: 255,
+                                lineNumber: 316,
                                 columnNumber: 11
                             }, this),
                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("input", {
@@ -424,13 +490,13 @@ function UniversalPartnerHub() {
                                 required: true
                             }, void 0, false, {
                                 fileName: "[project]/src/app/page.js",
-                                lineNumber: 256,
+                                lineNumber: 317,
                                 columnNumber: 11
                             }, this)
                         ]
                     }, void 0, true, {
                         fileName: "[project]/src/app/page.js",
-                        lineNumber: 254,
+                        lineNumber: 315,
                         columnNumber: 9
                     }, this),
                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -441,7 +507,7 @@ function UniversalPartnerHub() {
                                 children: "Password"
                             }, void 0, false, {
                                 fileName: "[project]/src/app/page.js",
-                                lineNumber: 268,
+                                lineNumber: 329,
                                 columnNumber: 11
                             }, this),
                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("input", {
@@ -453,13 +519,13 @@ function UniversalPartnerHub() {
                                 required: true
                             }, void 0, false, {
                                 fileName: "[project]/src/app/page.js",
-                                lineNumber: 269,
+                                lineNumber: 330,
                                 columnNumber: 11
                             }, this)
                         ]
                     }, void 0, true, {
                         fileName: "[project]/src/app/page.js",
-                        lineNumber: 267,
+                        lineNumber: 328,
                         columnNumber: 9
                     }, this),
                     error && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -467,7 +533,7 @@ function UniversalPartnerHub() {
                         children: error
                     }, void 0, false, {
                         fileName: "[project]/src/app/page.js",
-                        lineNumber: 279,
+                        lineNumber: 340,
                         columnNumber: 19
                     }, this),
                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
@@ -477,23 +543,23 @@ function UniversalPartnerHub() {
                         children: loading ? 'Processing...' : isLoginMode ? `Sign In as ${partnerType === 'hotel' ? 'Hotel Partner' : 'Delivery Rider'} ⚡` : `Register ${partnerType === 'hotel' ? 'Hotel Account' : 'Delivery Account'} 🚀`
                     }, void 0, false, {
                         fileName: "[project]/src/app/page.js",
-                        lineNumber: 281,
+                        lineNumber: 342,
                         columnNumber: 9
                     }, this)
                 ]
             }, void 0, true, {
                 fileName: "[project]/src/app/page.js",
-                lineNumber: 183,
+                lineNumber: 234,
                 columnNumber: 7
             }, this)
         ]
     }, void 0, true, {
         fileName: "[project]/src/app/page.js",
-        lineNumber: 137,
+        lineNumber: 188,
         columnNumber: 5
     }, this);
 }
-_s(UniversalPartnerHub, "JZ87T1qdp7vzUyJ74L8BjT+AHvI=", false, function() {
+_s(UniversalPartnerHub, "O+LKLUejxpWW+FIuqTQR3f9aaCQ=", false, function() {
     return [
         __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$navigation$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useRouter"]
     ];

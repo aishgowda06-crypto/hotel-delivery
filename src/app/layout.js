@@ -33,7 +33,7 @@ export default function RootLayout({ children }) {
     <html lang="en" className="h-full">
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0" />
-        <title>Shop Matries Partner Hub</title>
+        <title>Buy Brigg Hub</title>
       </head>
       
       {/* Outer theatrical background wrapper */}
@@ -48,7 +48,7 @@ export default function RootLayout({ children }) {
               <div className="flex items-center space-x-2">
                 <span className="w-7 h-7 bg-gradient-to-r from-red-500 to-orange-500 rounded-xl flex items-center justify-center text-white text-xs font-black shadow-md shadow-orange-500/25">⚡</span>
                 <h1 className="text-xs font-black tracking-tight text-slate-900">
-                  Shop Matries <span className="text-orange-600">{roleType === 'hotel' ? 'Hotel Hub' : 'Delivery Hub'}</span>
+                  Buy Brigg <span className="text-orange-600">{roleType === 'hotel' ? 'Hotel Hub' : 'Delivery Hub'}</span>
                 </h1>
               </div>
               <button 

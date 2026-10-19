@@ -25,6 +25,24 @@ export default function HotelDashboardPage() {
   // Audio looping reference so sound repeats continuously until an order is accepted or rejected
   const audioLoopRef = useRef(null);
 
+  // Helper to strictly calculate food-only total price (completely excluding delivery charges)
+  const calculateFoodOnlyTotal = (order) => {
+    if (order.items && Array.isArray(order.items) && order.items.length > 0) {
+      return order.items.reduce((sum, item) => {
+        const itemPrice = item.price || 0;
+        const itemQty = item.quantity || item.qty || 1;
+        return sum + (itemPrice * itemQty);
+      }, 0);
+    }
+    // Fallback if items array is missing: extract food price safely or default to 0
+    return order.foodTotal || order.subtotal || order.totalAmount || order.total || order.totalPrice || 0;
+  };
+
+  // Calculate sum of all active orders total revenue based strictly on food items only
+  const totalRevenue = orders.reduce((sum, order) => {
+    return sum + calculateFoodOnlyTotal(order);
+  }, 0);
+
   // Play continuous audio alert loop using Web Audio API with user-interaction unlock handler
   const startAudioLoop = (soundType) => {
     if (audioLoopRef.current) return; // Already playing
@@ -139,7 +157,8 @@ export default function HotelDashboardPage() {
 
         if (currentRest) {
           setRestaurantId(currentRest._id || currentRest.id);
-          setHotelStatus(currentRest.isManuallyOpen !== undefined ? currentRest.isManuallyOpen : (currentRest.isOpen !== undefined ? currentRest.isOpen : true));
+          const isOpenState = currentRest.isManuallyOpen !== undefined ? currentRest.isManuallyOpen : (currentRest.isOpen !== undefined ? currentRest.isOpen : true);
+          setHotelStatus(isOpenState);
           setRestaurantProfile(currentRest);
         }
 
@@ -183,9 +202,9 @@ export default function HotelDashboardPage() {
   };
 
   useEffect(() => {
-    // Ultra-persistent session recovery to prevent logout when closed or reloaded from PWA home screen
+    // Ultra-persistent session recovery ensuring correct restaurant/brand name retrieval
     let storedHotel = localStorage.getItem('shopmatries_hotel_name') || sessionStorage.getItem('shopmatries_hotel_name');
-    if (!storedHotel) {
+    if (!storedHotel || storedHotel === 'undefined' || storedHotel === 'null') {
       storedHotel = 'Partner Hotel';
     }
     localStorage.setItem('shopmatries_hotel_name', storedHotel);
@@ -263,9 +282,10 @@ export default function HotelDashboardPage() {
         if ('Notification' in window && Notification.permission === 'granted') {
           const orderIdShort = (newOrder._id || newOrder.id || 'NEW').slice(-6);
           const itemSummary = newOrder.items?.map(i => `${i.quantity || i.qty || 1}x ${i.englishName || i.itemName || i.dishName || i.name || 'Food Item'}`).join(', ') || 'New Food Item';
+          const foodTotal = calculateFoodOnlyTotal(newOrder);
           
           newNotificationHandler(`🔔 New Order #${orderIdShort} (${storedHotel})`, {
-            body: `Items: ${itemSummary}\nTotal: ₹${newOrder.totalAmount || newOrder.totalPrice || 0}`,
+            body: `Items: ${itemSummary}\nFood Total: ₹${foodTotal}`,
             icon: '/icon.png'
           });
         }
@@ -303,9 +323,15 @@ export default function HotelDashboardPage() {
         await fetch(`${API_URL}/api/restaurants/${restaurantId}/hours`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ isManuallyOpen: newStatus, autoMode: false })
+          body: JSON.stringify({ isManuallyOpen: newStatus, isOpen: newStatus, autoMode: false })
         });
       }
+      // Also hit status endpoint to ensure backend registers the change immediately
+      await fetch(`${API_URL}/api/foods/restaurants/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hotelName, restaurant: hotelName, isManuallyOpen: newStatus, isOpen: newStatus })
+      }).catch(() => {});
     } catch (err) {
       console.error('Failed to update hotel open status:', err);
     }
@@ -378,7 +404,7 @@ export default function HotelDashboardPage() {
       className="max-w-md mx-auto space-y-4 pb-10 relative"
     >
       
-      {/* INCOMING ORDER POPUP ALERT MODAL WITH ACCURATE ITEMS & QUANTITIES */}
+      {/* INCOMING ORDER POPUP ALERT MODAL WITH FOOD-ONLY PRICING */}
       {incomingPopupOrder && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn">
           <div className="bg-white border-2 border-orange-500 rounded-3xl p-5 max-w-sm w-full space-y-4 shadow-2xl text-center">
@@ -409,8 +435,8 @@ export default function HotelDashboardPage() {
                 </div>
               ))}
               <div className="pt-2 border-t border-orange-200 flex justify-between items-center text-xs font-black">
-                <span className="text-slate-900">Total Payable:</span>
-                <span className="text-orange-600 font-mono">₹{incomingPopupOrder.totalAmount || incomingPopupOrder.totalPrice || 0}</span>
+                <span className="text-slate-900">Food Total:</span>
+                <span className="text-orange-600 font-mono">₹{calculateFoodOnlyTotal(incomingPopupOrder)}</span>
               </div>
             </div>
 
@@ -480,8 +506,16 @@ export default function HotelDashboardPage() {
 
       {/* TAB 1: ORDERS */}
       {activeTab === 'orders' && (
-        <div className="space-y-2">
-          <h3 className="text-xs font-black uppercase text-slate-700 px-1">📦 Live Incoming Orders ({orders.length})</h3>
+        <div className="space-y-3">
+          <div className="flex justify-between items-center px-1">
+            <h3 className="text-xs font-black uppercase text-slate-700">📦 Live Incoming Orders ({orders.length})</h3>
+            {orders.length > 0 && (
+              <span className="text-[11px] font-black text-orange-600 bg-orange-50 px-2.5 py-1 rounded-lg border border-orange-200 font-mono">
+                Food Revenue: ₹{totalRevenue}
+              </span>
+            )}
+          </div>
+
           {orders.length === 0 ? (
             <div className="bg-white border border-orange-100 rounded-2xl p-6 text-center text-slate-400 text-xs font-medium">
               No active customer orders for {hotelName} right now.
@@ -493,6 +527,7 @@ export default function HotelDashboardPage() {
               const assignedRider = order.acceptedBy || order.riderName || order.deliveryPartner || null;
               const orderId = order._id || order.id || `order-${idx}`;
               const orderTimeStr = order.createdAt ? new Date(order.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : 'Just now';
+              const foodOnlyTotal = calculateFoodOnlyTotal(order);
 
               return (
                 <div key={orderId} className="bg-white border border-orange-100 rounded-2xl p-3.5 space-y-3 shadow-xs">
@@ -501,7 +536,10 @@ export default function HotelDashboardPage() {
                       <span className="text-slate-900">Order #{orderId.slice(-6)}</span>
                       <p className="text-[10px] text-slate-400 font-mono font-normal">Placed at: {orderTimeStr}</p>
                     </div>
-                    <span className="text-orange-600 bg-orange-50 px-2 py-0.5 rounded-md font-mono">₹{order.totalAmount || order.total || order.totalPrice || 0}</span>
+                    <div className="text-right">
+                      <span className="text-[9px] text-slate-400 uppercase block font-bold">Food Total</span>
+                      <span className="text-orange-600 bg-orange-50 px-2 py-0.5 rounded-md font-mono text-xs">₹{foodOnlyTotal}</span>
+                    </div>
                   </div>
 
                   <div className="flex gap-2 pt-1">

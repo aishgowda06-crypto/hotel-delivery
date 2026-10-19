@@ -14,6 +14,7 @@ export default function UniversalPartnerHub() {
   const [hotelSelectionType, setHotelSelectionType] = useState('restaurant'); // 'restaurant' or 'brand'
   const [selectedHotel, setSelectedHotel] = useState('');
   const [selectedBrand, setSelectedBrand] = useState('');
+  const [hotelSearchQuery, setHotelSearchQuery] = useState('');
   
   // Delivery specific states
   const [deliveryName, setDeliveryName] = useState('');
@@ -25,6 +26,21 @@ export default function UniversalPartnerHub() {
   
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Auto-redirect if already logged in (Fixes logout issue when clearing recents)
+  useEffect(() => {
+    const token = localStorage.getItem('shopmatries_token');
+    const isHotelOwner = localStorage.getItem('shopmatries_is_hotel_owner');
+    const isDeliveryPartner = localStorage.getItem('shopmatries_is_delivery_partner');
+
+    if (token) {
+      if (isHotelOwner === 'true') {
+        router.push('/hotel-dashboard');
+      } else if (isDeliveryPartner === 'true') {
+        router.push('/orders');
+      }
+    }
+  }, [router]);
 
   // Fetch live restaurants from /api/foods/restaurants and brands from /api/brands
   useEffect(() => {
@@ -65,7 +81,7 @@ export default function UniversalPartnerHub() {
 
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://food-cgs4.onrender.com';
     
-    // Target the newly separated hotel and delivery route endpoints
+    // Target the separated hotel and delivery route endpoints
     const rolePrefix = partnerType === 'hotel' ? 'hotel' : 'delivery';
     const actionPath = isLoginMode ? 'login' : 'register';
     const endpoint = `${API_URL}/api/auth/${rolePrefix}/${actionPath}`;
@@ -73,21 +89,23 @@ export default function UniversalPartnerHub() {
     let payload = { phone, password };
 
     if (partnerType === 'hotel') {
-      const activeHotel = hotelSelectionType === 'restaurant' ? selectedHotel : selectedBrand;
-      if (!activeHotel) {
-        setError('Please select a hotel or brand from the list.');
-        setLoading(false);
-        return;
+      if (!isLoginMode) {
+        const activeHotel = hotelSelectionType === 'restaurant' ? selectedHotel : selectedBrand;
+        if (!activeHotel) {
+          setError('Please select a hotel or brand from the list.');
+          setLoading(false);
+          return;
+        }
+        payload = { 
+          phone, 
+          password, 
+          hotelName: hotelSelectionType === 'restaurant' ? selectedHotel : selectedBrand, 
+          restaurant: hotelSelectionType === 'restaurant' ? selectedHotel : 'General',
+          brand: hotelSelectionType === 'brand' ? selectedBrand : 'General'
+        };
+      } else {
+        payload = { phone, password };
       }
-      payload = isLoginMode 
-        ? { phone, password } 
-        : { 
-            phone, 
-            password, 
-            hotelName: hotelSelectionType === 'restaurant' ? selectedHotel : 'Partner Hotel', 
-            restaurant: hotelSelectionType === 'restaurant' ? selectedHotel : 'Partner Hotel',
-            brand: hotelSelectionType === 'brand' ? selectedBrand : 'General'
-          };
     } else {
       if (!isLoginMode && !deliveryName.trim()) {
         setError('Please enter your full name.');
@@ -113,8 +131,37 @@ export default function UniversalPartnerHub() {
 
         if (partnerType === 'hotel') {
           localStorage.setItem('shopmatries_is_hotel_owner', 'true');
-          const finalHotelName = data.hotelName || data.restaurant || selectedHotel || selectedBrand || 'Partner Hotel';
-          localStorage.setItem('shopmatries_hotel_name', finalHotelName);
+          
+          // Accurately map hotel name or brand name, preventing fallback mismatches
+          let finalName = data.hotelName || data.restaurant || data.brand || data.user?.hotelName || data.user?.brand;
+          
+          if (!finalName || finalName === 'Partner Hotel') {
+            if (!isLoginMode) {
+              finalName = hotelSelectionType === 'brand' ? selectedBrand : selectedHotel;
+            } else {
+              try {
+                const [restRes, brandRes] = await Promise.all([
+                  fetch(`${API_URL}/api/foods/restaurants`).then(r => r.json()).catch(() => []),
+                  fetch(`${API_URL}/api/brands`).then(r => r.json()).catch(() => [])
+                ]);
+                const rList = Array.isArray(restRes) ? restRes : (restRes.restaurants || restRes.data || []);
+                const bList = Array.isArray(brandRes) ? brandRes : (brandRes.brands || brandRes.data || []);
+                
+                const matchedRest = rList.find(r => r.phone === phone || r.contact === phone);
+                const matchedBrand = bList.find(b => b.phone === phone || b.contact === phone);
+
+                if (matchedBrand) {
+                  finalName = matchedBrand.name || matchedBrand.brandName;
+                } else if (matchedRest) {
+                  finalName = matchedRest.hotelName || matchedRest.name || matchedRest.restaurantName;
+                } else {
+                  finalName = rList[0]?.hotelName || bList[0]?.name || 'Partner Hotel';
+                }
+              } catch (err) {}
+            }
+          }
+
+          localStorage.setItem('shopmatries_hotel_name', finalName || 'Partner Hotel');
           router.push('/hotel-dashboard');
         } else {
           localStorage.setItem('shopmatries_is_delivery_partner', 'true');
@@ -133,13 +180,17 @@ export default function UniversalPartnerHub() {
     }
   };
 
+  // Filtered lists for search feature during registration
+  const filteredRestaurants = backendRestaurants.filter(r => r.toLowerCase().includes(hotelSearchQuery.toLowerCase()));
+  const filteredBrands = backendBrands.filter(b => b.toLowerCase().includes(hotelSearchQuery.toLowerCase()));
+
   return (
     <div className="max-w-md mx-auto pt-4 space-y-4">
       
       {/* Header */}
       <div className="text-center space-y-1">
         <span className="text-2xl">⚡</span>
-        <h1 className="text-lg font-black text-slate-950">Shop Matries Partner Hub</h1>
+        <h1 className="text-lg font-black text-slate-950">Buy Brigg Hub</h1>
         <p className="text-[11px] text-slate-500">Universal portal for hotel owners & delivery riders</p>
       </div>
 
@@ -182,20 +233,20 @@ export default function UniversalPartnerHub() {
       {/* Form Container */}
       <form onSubmit={handleSubmit} className="bg-white border border-orange-100 rounded-[26px] p-4 shadow-sm space-y-3">
         
-        {/* HOTEL PARTNER: Choose Hotel or Brand Dropdown */}
-        {partnerType === 'hotel' && (
+        {/* HOTEL PARTNER & REGISTER MODE: Choose Hotel or Brand with Search */}
+        {partnerType === 'hotel' && !isLoginMode && (
           <>
             <div className="grid grid-cols-2 gap-1 bg-orange-50 p-1 rounded-xl border border-orange-100">
               <button
                 type="button"
-                onClick={() => setHotelSelectionType('restaurant')}
+                onClick={() => { setHotelSelectionType('restaurant'); setHotelSearchQuery(''); }}
                 className={`py-1.5 text-[10px] font-bold rounded-lg transition ${hotelSelectionType === 'restaurant' ? 'bg-orange-500 text-white shadow-sm' : 'text-slate-600'}`}
               >
                 🏨 Hotels
               </button>
               <button
                 type="button"
-                onClick={() => setHotelSelectionType('brand')}
+                onClick={() => { setHotelSelectionType('brand'); setHotelSearchQuery(''); }}
                 className={`py-1.5 text-[10px] font-bold rounded-lg transition ${hotelSelectionType === 'brand' ? 'bg-orange-500 text-white shadow-sm' : 'text-slate-600'}`}
               >
                 🏷️ Brands
@@ -204,8 +255,18 @@ export default function UniversalPartnerHub() {
 
             <div className="space-y-1">
               <label className="text-[10px] font-black text-slate-600 uppercase">
-                {hotelSelectionType === 'restaurant' ? 'Select Hotel / Restaurant' : 'Select Brand'}
+                {hotelSelectionType === 'restaurant' ? 'Search & Select Hotel / Restaurant' : 'Search & Select Brand'}
               </label>
+              
+              {/* Search input to easily find hotels/brands */}
+              <input
+                type="text"
+                placeholder="Type to search..."
+                value={hotelSearchQuery}
+                onChange={(e) => setHotelSearchQuery(e.target.value)}
+                className="w-full bg-orange-50/20 border border-orange-200 text-slate-900 text-xs rounded-xl py-2 px-3 font-medium focus:outline-none focus:border-orange-500 mb-1"
+              />
+
               <select
                 value={hotelSelectionType === 'restaurant' ? selectedHotel : selectedBrand}
                 onChange={(e) => {
@@ -218,16 +279,16 @@ export default function UniversalPartnerHub() {
                 {loadingBackend ? (
                   <option value="">Loading from backend...</option>
                 ) : hotelSelectionType === 'restaurant' ? (
-                  backendRestaurants.length === 0 ? (
-                    <option value="">No hotels found</option>
+                  filteredRestaurants.length === 0 ? (
+                    <option value="">No matching hotels found</option>
                   ) : (
-                    backendRestaurants.map((r, i) => <option key={i} value={r}>🏨 {r}</option>)
+                    filteredRestaurants.map((r, i) => <option key={i} value={r}>🏨 {r}</option>)
                   )
                 ) : (
-                  backendBrands.length === 0 ? (
-                    <option value="">No brands found</option>
+                  filteredBrands.length === 0 ? (
+                    <option value="">No matching brands found</option>
                   ) : (
-                    backendBrands.map((b, i) => <option key={i} value={b}>🏷️ {b}</option>)
+                    filteredBrands.map((b, i) => <option key={i} value={b}>🏷️ {b}</option>)
                   )
                 )}
               </select>
