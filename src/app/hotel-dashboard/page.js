@@ -162,13 +162,16 @@ export default function HotelDashboardPage() {
           return bName.trim().toLowerCase() === cleanTarget;
         });
 
+        let targetRestId = '';
         if (currentBrand) {
-          setRestaurantId(currentBrand._id || currentBrand.id);
+          targetRestId = currentBrand._id || currentBrand.id;
+          setRestaurantId(targetRestId);
           const isOpenState = currentBrand.isManuallyOpen !== undefined ? currentBrand.isManuallyOpen : (currentBrand.isOpen !== undefined ? currentBrand.isOpen : true);
           setHotelStatus(isOpenState);
           setRestaurantProfile({ ...currentBrand, isBrandAccount: true });
         } else if (currentRest) {
-          setRestaurantId(currentRest._id || currentRest.id);
+          targetRestId = currentRest._id || currentRest.id;
+          setRestaurantId(targetRestId);
           const isOpenState = currentRest.isManuallyOpen !== undefined ? currentRest.isManuallyOpen : (currentRest.isOpen !== undefined ? currentRest.isOpen : true);
           setHotelStatus(isOpenState);
           setRestaurantProfile({ ...currentRest, isBrandAccount: false });
@@ -177,17 +180,31 @@ export default function HotelDashboardPage() {
         const allFoods = Array.isArray(foodData) ? foodData : (foodData.foods || foodData.items || foodData.data || foodData.result || []);
         const embeddedMenu = currentRest?.menu || currentBrand?.menu || currentRest?.items || currentBrand?.items || [];
         
+        // STRICT FILTER: Only match food items belonging explicitly to this hotel/brand name or restaurant ID
         const matchedFoods = allFoods.filter(f => {
           const fRest = f.restaurant || f.hotelName || f.hotel || f.hotelname || f.brand || f.restaurantName || '';
-          return fRest.trim().toLowerCase() === cleanTarget;
+          const fHotelId = f.hotelId || f.restaurantId || '';
+          const matchesName = fRest.trim().toLowerCase() === cleanTarget;
+          const matchesId = targetRestId && (fHotelId === targetRestId);
+          return matchesName || matchesId;
         });
 
         const combinedMenu = [...embeddedMenu, ...matchedFoods];
-        const finalMenuList = combinedMenu.length > 0 ? combinedMenu : allFoods;
+        
+        // Deduplicate menu items by ID or name
+        const uniqueMenuMap = new Map();
+        combinedMenu.forEach(item => {
+          const validId = item._id || item.id || item.englishName || item.name;
+          if (validId && !uniqueMenuMap.has(validId)) {
+            uniqueMenuMap.set(validId, item);
+          }
+        });
+
+        const finalMenuList = Array.from(uniqueMenuMap.values());
 
         const formattedMenu = finalMenuList.map((item, idx) => {
           const exactName = item.englishName || item.itemName || item.dishName || item.foodName || item.title || item.name || item.dish || item.strName || `Dish #${idx + 1}`;
-          const exactPrice = item.price || item.cost || item.amount || item.rate || 150;
+          const exactPrice = item.price || item.basePrice || item.cost || item.amount || item.rate || 150;
           const isAvail = item.isAvailable !== false && (item.available !== false);
 
           const validId = item._id || item.id;
@@ -509,7 +526,7 @@ export default function HotelDashboardPage() {
           onClick={() => setActiveTab('menu')}
           className={`flex-1 py-2 px-2 rounded-xl text-[10px] font-black uppercase transition cursor-pointer ${activeTab === 'menu' ? 'bg-orange-600 text-white shadow-sm' : 'text-slate-600 hover:text-orange-600'}`}
         >
-          🍱 Menu
+          🍱 Menu ({menuItems.length})
         </button>
         <button
           onClick={() => setActiveTab('profile')}
