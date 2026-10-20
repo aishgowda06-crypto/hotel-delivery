@@ -34,7 +34,6 @@ export default function HotelDashboardPage() {
         return sum + (itemPrice * itemQty);
       }, 0);
     }
-    // Fallback if items array is missing: extract food price safely or default to 0
     return order.foodTotal || order.subtotal || order.totalAmount || order.total || order.totalPrice || 0;
   };
 
@@ -123,9 +122,10 @@ export default function HotelDashboardPage() {
     Promise.all([
       fetch(`${API_URL}/api/orders`).then(res => res.json()).catch(() => []),
       fetch(`${API_URL}/api/foods`).then(res => res.json()).catch(() => []),
-      fetch(`${API_URL}/api/foods/restaurants`).then(res => res.json()).catch(() => [])
+      fetch(`${API_URL}/api/foods/restaurants`).then(res => res.json()).catch(() => []),
+      fetch(`${API_URL}/api/brands`).then(res => res.json()).catch(() => [])
     ])
-      .then(([orderData, foodData, restaurantData]) => {
+      .then(([orderData, foodData, restaurantData, brandData]) => {
         // 1. Filter orders for this specific hotel dashboard
         const allOrders = Array.isArray(orderData) ? orderData : (orderData.orders || orderData.data || orderData.result || []);
         const filteredOrders = allOrders.filter(o => {
@@ -148,22 +148,34 @@ export default function HotelDashboardPage() {
 
         setOrders(filteredOrders);
 
-        // 2. Extract restaurant and catalog items
+        // 2. Extract restaurant and brand catalog items
         const restList = Array.isArray(restaurantData) ? restaurantData : (restaurantData.restaurants || restaurantData.data || restaurantData.result || []);
+        const bList = Array.isArray(brandData) ? brandData : (brandData.brands || brandData.data || brandData.result || []);
+
         const currentRest = restList.find(r => {
           const rName = r.hotelName || r.hotel || r.restaurant || r.restaurantName || r.name || r.title || '';
           return rName.trim().toLowerCase() === cleanTarget;
         });
 
-        if (currentRest) {
+        const currentBrand = bList.find(b => {
+          const bName = b.name || b.brandName || b.title || '';
+          return bName.trim().toLowerCase() === cleanTarget;
+        });
+
+        if (currentBrand) {
+          setRestaurantId(currentBrand._id || currentBrand.id);
+          const isOpenState = currentBrand.isManuallyOpen !== undefined ? currentBrand.isManuallyOpen : (currentBrand.isOpen !== undefined ? currentBrand.isOpen : true);
+          setHotelStatus(isOpenState);
+          setRestaurantProfile({ ...currentBrand, isBrandAccount: true });
+        } else if (currentRest) {
           setRestaurantId(currentRest._id || currentRest.id);
           const isOpenState = currentRest.isManuallyOpen !== undefined ? currentRest.isManuallyOpen : (currentRest.isOpen !== undefined ? currentRest.isOpen : true);
           setHotelStatus(isOpenState);
-          setRestaurantProfile(currentRest);
+          setRestaurantProfile({ ...currentRest, isBrandAccount: false });
         }
 
         const allFoods = Array.isArray(foodData) ? foodData : (foodData.foods || foodData.items || foodData.data || foodData.result || []);
-        const embeddedMenu = currentRest?.menu || currentRest?.items || currentRest?.foodItems || currentRest?.dishes || [];
+        const embeddedMenu = currentRest?.menu || currentBrand?.menu || currentRest?.items || currentBrand?.items || [];
         
         const matchedFoods = allFoods.filter(f => {
           const fRest = f.restaurant || f.hotelName || f.hotel || f.hotelname || f.brand || f.restaurantName || '';
@@ -319,19 +331,22 @@ export default function HotelDashboardPage() {
 
     try {
       const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://food-cgs4.onrender.com';
+      
+      const isBrandAccount = restaurantProfile.isBrandAccount === true || 
+                             localStorage.getItem('shopmatries_is_brand') === 'true' ||
+                             restaurantProfile.type === 'brand';
+
       if (restaurantId) {
-        await fetch(`${API_URL}/api/restaurants/${restaurantId}/hours`, {
+        const endpoint = isBrandAccount 
+          ? `${API_URL}/api/brands/${restaurantId}/hours` 
+          : `${API_URL}/api/restaurants/${restaurantId}/hours`;
+
+        await fetch(endpoint, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ isManuallyOpen: newStatus, isOpen: newStatus, autoMode: false })
         });
       }
-      // Also hit status endpoint to ensure backend registers the change immediately
-      await fetch(`${API_URL}/api/foods/restaurants/status`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hotelName, restaurant: hotelName, isManuallyOpen: newStatus, isOpen: newStatus })
-      }).catch(() => {});
     } catch (err) {
       console.error('Failed to update hotel open status:', err);
     }

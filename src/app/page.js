@@ -9,6 +9,7 @@ export default function UniversalPartnerHub() {
   
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   
   // Hotel & Brand specific states
   const [hotelSelectionType, setHotelSelectionType] = useState('restaurant'); // 'restaurant' or 'brand'
@@ -327,14 +328,24 @@ export default function UniversalPartnerHub() {
 
         <div className="space-y-1">
           <label className="text-[10px] font-black text-slate-600 uppercase">Password</label>
-          <input
-            type="password"
-            placeholder="Enter password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full bg-orange-50/30 border border-orange-200 text-slate-900 text-xs rounded-xl py-3 px-3 font-semibold focus:outline-none focus:border-orange-500"
-            required
-          />
+          <div className="relative">
+            <input
+              type={showPassword ? 'text' : 'password'}
+              placeholder="Enter password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full bg-orange-50/30 border border-orange-200 text-slate-900 text-xs rounded-xl py-3 pl-3 pr-10 font-semibold focus:outline-none focus:border-orange-500"
+              required
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-sm cursor-pointer select-none"
+              tabIndex={-1}
+            >
+              {showPassword ? '👁️‍🗨️' : '👁️'}
+            </button>
+          </div>
         </div>
 
         {error && <div className="bg-orange-50 border border-orange-200 text-orange-700 text-xs font-bold px-3 py-2 rounded-xl text-center">{error}</div>}
