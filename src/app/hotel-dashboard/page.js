@@ -25,22 +25,24 @@ export default function HotelDashboardPage() {
   // Audio looping reference so sound repeats continuously until an order is accepted or rejected
   const audioLoopRef = useRef(null);
 
-  // Helper to strictly calculate food-only total price (completely excluding delivery charges)
-  const calculateFoodOnlyTotal = (order) => {
+  // Helper to strictly calculate food-only total price using original menu prices from catalog with fallback name matching
+  const calculateFoodOnlyTotal = (order, currentMenu) => {
     if (order.items && Array.isArray(order.items) && order.items.length > 0) {
       return order.items.reduce((sum, item) => {
-        const itemPrice = item.price || 0;
+        const foodId = String(item.foodItem || item.id || '');
+        const itemName = (item.name || item.englishName || '').trim().toLowerCase();
+        
+        const catalogItem = currentMenu.find(m => 
+          String(m._id) === foodId || (itemName && m.name.trim().toLowerCase() === itemName)
+        );
+        
+        const itemPrice = catalogItem ? catalogItem.price : (item.basePrice || item.price || 0);
         const itemQty = item.quantity || item.qty || 1;
         return sum + (itemPrice * itemQty);
       }, 0);
     }
     return order.foodTotal || order.subtotal || order.totalAmount || order.total || order.totalPrice || 0;
   };
-
-  // Calculate sum of all active orders total revenue based strictly on food items only
-  const totalRevenue = orders.reduce((sum, order) => {
-    return sum + calculateFoodOnlyTotal(order);
-  }, 0);
 
   // Play continuous audio alert loop using Web Audio API with user-interaction unlock handler
   const startAudioLoop = (soundType) => {
@@ -126,29 +128,7 @@ export default function HotelDashboardPage() {
       fetch(`${API_URL}/api/brands`).then(res => res.json()).catch(() => [])
     ])
       .then(([orderData, foodData, restaurantData, brandData]) => {
-        // 1. Filter orders for this specific hotel dashboard
-        const allOrders = Array.isArray(orderData) ? orderData : (orderData.orders || orderData.data || orderData.result || []);
-        const filteredOrders = allOrders.filter(o => {
-          const rest = o.restaurant || o.hotelName || o.restaurantName || o.hotel || o.brand || '';
-          return rest.trim().toLowerCase() === cleanTarget;
-        });
-
-        // Check if there are any pending/new incoming orders to trigger alarm loop & popup modal
-        const pendingOrders = filteredOrders.filter(o => !o.status || o.status === 'Pending' || o.status === 'Hub');
-        if (pendingOrders.length > 0) {
-          const savedSound = localStorage.getItem('shopmatries_notification_sound') || 'bell';
-          startAudioLoop(savedSound);
-          if (!incomingPopupOrder) {
-            setIncomingPopupOrder(pendingOrders[0]);
-          }
-        } else {
-          stopAudioLoop();
-          setIncomingPopupOrder(null);
-        }
-
-        setOrders(filteredOrders);
-
-        // 2. Extract restaurant and brand catalog items
+        // 1. Extract restaurant and brand catalog items first to build formatted menu
         const restList = Array.isArray(restaurantData) ? restaurantData : (restaurantData.restaurants || restaurantData.data || restaurantData.result || []);
         const bList = Array.isArray(brandData) ? brandData : (brandData.brands || brandData.data || brandData.result || []);
 
@@ -204,7 +184,7 @@ export default function HotelDashboardPage() {
 
         const formattedMenu = finalMenuList.map((item, idx) => {
           const exactName = item.englishName || item.itemName || item.dishName || item.foodName || item.title || item.name || item.dish || item.strName || `Dish #${idx + 1}`;
-          const exactPrice = item.price || item.basePrice || item.cost || item.amount || item.rate || 150;
+          const exactPrice = item.basePrice !== undefined ? Number(item.basePrice) : Number(item.price || item.cost || item.amount || item.rate || 150);
           const isAvail = item.isAvailable !== false && (item.available !== false);
 
           const validId = item._id || item.id;
@@ -219,6 +199,28 @@ export default function HotelDashboardPage() {
         }).filter(Boolean);
 
         setMenuItems(formattedMenu);
+
+        // 2. Filter orders for this specific hotel dashboard
+        const allOrders = Array.isArray(orderData) ? orderData : (orderData.orders || orderData.data || orderData.result || []);
+        const filteredOrders = allOrders.filter(o => {
+          const rest = o.restaurant || o.hotelName || o.restaurantName || o.hotel || o.brand || '';
+          return rest.trim().toLowerCase() === cleanTarget;
+        });
+
+        // Check if there are any pending/new incoming orders to trigger alarm loop & popup modal
+        const pendingOrders = filteredOrders.filter(o => !o.status || o.status === 'Pending' || o.status === 'Hub');
+        if (pendingOrders.length > 0) {
+          const savedSound = localStorage.getItem('shopmatries_notification_sound') || 'bell';
+          startAudioLoop(savedSound);
+          if (!incomingPopupOrder) {
+            setIncomingPopupOrder(pendingOrders[0]);
+          }
+        } else {
+          stopAudioLoop();
+          setIncomingPopupOrder(null);
+        }
+
+        setOrders(filteredOrders);
         if (isInitial) setLoading(false);
       })
       .catch(err => {
@@ -311,7 +313,7 @@ export default function HotelDashboardPage() {
         if ('Notification' in window && Notification.permission === 'granted') {
           const orderIdShort = (newOrder._id || newOrder.id || 'NEW').slice(-6);
           const itemSummary = newOrder.items?.map(i => `${i.quantity || i.qty || 1}x ${i.englishName || i.itemName || i.dishName || i.name || 'Food Item'}`).join(', ') || 'New Food Item';
-          const foodTotal = calculateFoodOnlyTotal(newOrder);
+          const foodTotal = calculateFoodOnlyTotal(newOrder, menuItems);
           
           newNotificationHandler(`🔔 New Order #${orderIdShort} (${storedHotel})`, {
             body: `Items: ${itemSummary}\nFood Total: ₹${foodTotal}`,
@@ -424,6 +426,10 @@ export default function HotelDashboardPage() {
     item.name.toLowerCase().includes(menuSearchQuery.toLowerCase())
   );
 
+  const totalRevenue = orders.reduce((sum, order) => {
+    return sum + calculateFoodOnlyTotal(order, menuItems);
+  }, 0);
+
   return (
     <div 
       onClick={() => {
@@ -436,7 +442,7 @@ export default function HotelDashboardPage() {
       className="max-w-md mx-auto space-y-4 pb-10 relative"
     >
       
-      {/* INCOMING ORDER POPUP ALERT MODAL WITH FOOD-ONLY PRICING */}
+      {/* INCOMING ORDER POPUP ALERT MODAL WITH ORIGINAL MENU PRICES */}
       {incomingPopupOrder && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn">
           <div className="bg-white border-2 border-orange-500 rounded-3xl p-5 max-w-sm w-full space-y-4 shadow-2xl text-center">
@@ -459,16 +465,25 @@ export default function HotelDashboardPage() {
             </div>
 
             <div className="bg-orange-50/70 border border-orange-200 rounded-2xl p-3 text-left space-y-1.5 max-h-40 overflow-y-auto">
-              <p className="text-[10px] font-black uppercase text-orange-800 border-b border-orange-200 pb-1">Ordered Items & Quantities</p>
-              {incomingPopupOrder.items?.map((item, idx) => (
-                <div key={idx} className="flex justify-between items-center text-xs text-slate-800 font-bold">
-                  <span>{item.quantity || item.qty || 1}x {item.englishName || item.itemName || item.dishName || item.name || 'Food Item'}</span>
-                  <span className="font-mono text-orange-600">₹{(item.price || 0) * (item.quantity || item.qty || 1)}</span>
-                </div>
-              ))}
+              <p className="text-[10px] font-black uppercase text-orange-800 border-b border-orange-200 pb-1">Ordered Items & Original Menu Prices</p>
+              {incomingPopupOrder.items?.map((item, idx) => {
+                const foodId = String(item.foodItem || item.id || '');
+                const itemName = (item.name || item.englishName || '').trim().toLowerCase();
+                const catalogItem = menuItems.find(m => 
+                  String(m._id) === foodId || (itemName && m.name.trim().toLowerCase() === itemName)
+                );
+                const itemPrice = catalogItem ? catalogItem.price : (item.basePrice || item.price || 0);
+                const itemQty = item.quantity || item.qty || 1;
+                return (
+                  <div key={idx} className="flex justify-between items-center text-xs text-slate-800 font-bold">
+                    <span>{itemQty}x {item.englishName || item.itemName || item.dishName || item.name || 'Food Item'}</span>
+                    <span className="font-mono text-orange-600">₹{itemPrice} each (Total: ₹{itemPrice * itemQty})</span>
+                  </div>
+                );
+              })}
               <div className="pt-2 border-t border-orange-200 flex justify-between items-center text-xs font-black">
                 <span className="text-slate-900">Food Total:</span>
-                <span className="text-orange-600 font-mono">₹{calculateFoodOnlyTotal(incomingPopupOrder)}</span>
+                <span className="text-orange-600 font-mono">₹{calculateFoodOnlyTotal(incomingPopupOrder, menuItems)}</span>
               </div>
             </div>
 
@@ -559,7 +574,7 @@ export default function HotelDashboardPage() {
               const assignedRider = order.acceptedBy || order.riderName || order.deliveryPartner || null;
               const orderId = order._id || order.id || `order-${idx}`;
               const orderTimeStr = order.createdAt ? new Date(order.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : 'Just now';
-              const foodOnlyTotal = calculateFoodOnlyTotal(order);
+              const foodOnlyTotal = calculateFoodOnlyTotal(order, menuItems);
 
               return (
                 <div key={orderId} className="bg-white border border-orange-100 rounded-2xl p-3.5 space-y-3 shadow-xs">
@@ -605,13 +620,23 @@ export default function HotelDashboardPage() {
                     )}
                   </div>
 
-                  <div className="text-[11px] text-slate-600 space-y-0.5 pt-1 border-t border-orange-100">
-                    {order.items?.map((item, i) => (
-                      <div key={i} className="flex justify-between font-bold">
-                        <span>{item.quantity || item.qty || 1}x {item.englishName || item.itemName || item.dishName || item.name || 'Food Item'}</span>
-                        <span className="text-slate-900">₹{(item.price || 0) * (item.quantity || item.qty || 1)}</span>
-                      </div>
-                    ))}
+                  <div className="text-[11px] text-slate-600 space-y-1 pt-1 border-t border-orange-100">
+                    <p className="text-[10px] font-bold uppercase text-slate-400">Ordered Items & Original Menu Prices:</p>
+                    {order.items?.map((item, i) => {
+                      const foodId = String(item.foodItem || item.id || '');
+                      const itemName = (item.name || item.englishName || '').trim().toLowerCase();
+                      const catalogItem = menuItems.find(m => 
+                        String(m._id) === foodId || (itemName && m.name.trim().toLowerCase() === itemName)
+                      );
+                      const itemPrice = catalogItem ? catalogItem.price : (item.basePrice || item.price || 0);
+                      const itemQty = item.quantity || item.qty || 1;
+                      return (
+                        <div key={i} className="flex justify-between font-bold">
+                          <span>{itemQty}x {item.englishName || item.itemName || item.dishName || item.name || 'Food Item'}</span>
+                          <span className="text-slate-900 font-mono">₹{itemPrice} each (₹{itemPrice * itemQty})</span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               );
@@ -675,7 +700,7 @@ export default function HotelDashboardPage() {
               <div key={item._id} className="bg-white border border-orange-100 rounded-2xl p-3 flex justify-between items-center shadow-xs">
                 <div className="space-y-0.5">
                   <h4 className="text-xs font-black text-slate-900">{item.name}</h4>
-                  <p className="text-[10px] text-slate-500">₹{item.price}</p>
+                  <p className="text-[10px] text-slate-500">Menu Price: ₹{item.price}</p>
                 </div>
                 <button
                   onClick={() => toggleItemAvailability(item._id)}
