@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
 import { initializeApp } from 'firebase/app';
-import { getMessaging, getToken } from 'firebase/messaging';
+import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 
 export default function DeliveryLiveOrders() {
   const [isDeliveryLoggedIn, setIsDeliveryLoggedIn] = useState(false);
@@ -30,7 +30,7 @@ export default function DeliveryLiveOrders() {
     }
     setIsCheckingAuth(false);
 
-    // Register Firebase Push Notifications for Delivery Partner Device (Background & Sleep Ready)
+    // Register Firebase Push Notifications for Delivery Partner Device (Background & Foreground Ready)
     async function registerFCMToken() {
       try {
         const permission = await Notification.requestPermission();
@@ -70,10 +70,21 @@ export default function DeliveryLiveOrders() {
             await fetch(`${API_URL}/api/save-admin-token`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ token })
+              body: JSON.stringify({ token, role: 'delivery' }) // Explicitly pass role so backend routes it to delivery tokens
             });
             console.log('✅ Delivery Partner FCM Token Registered Successfully:', token);
           }
+
+          // Handle foreground push messages when the app tab is actively open
+          onMessage(messaging, (payload) => {
+            console.log('Foreground message received in active delivery tab:', payload);
+            if ('Notification' in window && Notification.permission === 'granted') {
+              new Notification(payload.notification?.title || '⚡ New Order Dispatch', {
+                body: payload.notification?.body || 'You have a new delivery order!',
+                icon: '/icon.png'
+              });
+            }
+          });
         }
       } catch (err) {
         console.log('FCM Token registration skipped or failed:', err);

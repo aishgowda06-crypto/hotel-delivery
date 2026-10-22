@@ -309,14 +309,24 @@ export default function HotelDashboardPage() {
         const savedSound = localStorage.getItem('shopmatries_notification_sound') || 'bell';
         startAudioLoop(savedSound);
 
-        // Native Web Notification showing exact Order ID, food item names, and quantities
+        // Native Web Notification showing exact Order ID, food item names, and strict catalog menu price total
         if ('Notification' in window && Notification.permission === 'granted') {
           const orderIdShort = (newOrder._id || newOrder.id || 'NEW').slice(-6);
-          const itemSummary = newOrder.items?.map(i => `${i.quantity || i.qty || 1}x ${i.englishName || i.itemName || i.dishName || i.name || 'Food Item'}`).join(', ') || 'New Food Item';
           const foodTotal = calculateFoodOnlyTotal(newOrder, menuItems);
           
+          const itemSummary = newOrder.items?.map(i => {
+            const foodId = String(i.foodItem || i.id || '');
+            const itemName = (i.name || i.englishName || '').trim().toLowerCase();
+            const catalogItem = menuItems.find(m => 
+              String(m._id) === foodId || (itemName && m.name.trim().toLowerCase() === itemName)
+            );
+            const exactMenuPrice = catalogItem ? catalogItem.price : (i.basePrice || i.price || 0);
+            const qty = i.quantity || i.qty || 1;
+            return `${qty}x ${i.englishName || i.itemName || i.dishName || i.name || 'Food Item'} (₹${exactMenuPrice} ea)`;
+          }).join(', ') || 'New Food Item';
+          
           newNotificationHandler(`🔔 New Order #${orderIdShort} (${storedHotel})`, {
-            body: `Items: ${itemSummary}\nFood Total: ₹${foodTotal}`,
+            body: `Items: ${itemSummary}\nMenu Food Total: ₹${foodTotal}`,
             icon: '/icon.png'
           });
         }
@@ -342,7 +352,7 @@ export default function HotelDashboardPage() {
       clearInterval(pollInterval);
       stopAudioLoop();
     };
-  }, []);
+  }, [menuItems]);
 
   const toggleHotelStatus = async () => {
     const newStatus = !hotelStatus;
@@ -482,7 +492,7 @@ export default function HotelDashboardPage() {
                 );
               })}
               <div className="pt-2 border-t border-orange-200 flex justify-between items-center text-xs font-black">
-                <span className="text-slate-900">Food Total:</span>
+                <span className="text-slate-900">Menu Food Total:</span>
                 <span className="text-orange-600 font-mono">₹{calculateFoodOnlyTotal(incomingPopupOrder, menuItems)}</span>
               </div>
             </div>
@@ -558,7 +568,7 @@ export default function HotelDashboardPage() {
             <h3 className="text-xs font-black uppercase text-slate-700">📦 Live Incoming Orders ({orders.length})</h3>
             {orders.length > 0 && (
               <span className="text-[11px] font-black text-orange-600 bg-orange-50 px-2.5 py-1 rounded-lg border border-orange-200 font-mono">
-                Food Revenue: ₹{totalRevenue}
+                Menu Food Revenue: ₹{totalRevenue}
               </span>
             )}
           </div>
@@ -584,7 +594,7 @@ export default function HotelDashboardPage() {
                       <p className="text-[10px] text-slate-400 font-mono font-normal">Placed at: {orderTimeStr}</p>
                     </div>
                     <div className="text-right">
-                      <span className="text-[9px] text-slate-400 uppercase block font-bold">Food Total</span>
+                      <span className="text-[9px] text-slate-400 uppercase block font-bold">Menu Food Total</span>
                       <span className="text-orange-600 bg-orange-50 px-2 py-0.5 rounded-md font-mono text-xs">₹{foodOnlyTotal}</span>
                     </div>
                   </div>
