@@ -320,13 +320,13 @@ export default function HotelDashboardPage() {
             const catalogItem = menuItems.find(m => 
               String(m._id) === foodId || (itemName && m.name.trim().toLowerCase() === itemName)
             );
-            const exactMenuPrice = catalogItem ? catalogItem.price : (i.basePrice || i.price || 0);
+            
             const qty = i.quantity || i.qty || 1;
-            return `${qty}x ${i.englishName || i.itemName || i.dishName || i.name || 'Food Item'} (₹${exactMenuPrice} ea)`;
+            return `${qty}x ${i.englishName || i.itemName || i.dishName || i.name || 'Food Item'}`;
           }).join(', ') || 'New Food Item';
           
           newNotificationHandler(`🔔 New Order #${orderIdShort} (${storedHotel})`, {
-            body: `Items: ${itemSummary}\nMenu Food Total: ₹${foodTotal}`,
+            body: `Items: ${itemSummary}`,
             icon: '/icon.png'
           });
         }
