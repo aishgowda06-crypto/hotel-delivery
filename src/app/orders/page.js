@@ -9,7 +9,6 @@ export default function DeliveryLiveOrders() {
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [orders, setOrders] = useState([]);
   
-  // New tab and profile state for delivery partner
   const [activeTab, setActiveTab] = useState('live');
   const [deliveryPartnerName, setDeliveryPartnerName] = useState('Delivery Partner');
   const [deliveryPartnerPhone, setDeliveryPartnerPhone] = useState('');
@@ -30,7 +29,7 @@ export default function DeliveryLiveOrders() {
     }
     setIsCheckingAuth(false);
 
-    // Register Firebase Push Notifications for Delivery Partner Device (Background & Foreground Ready)
+    // Register Firebase Push Notifications for Delivery Partner Device
     async function registerFCMToken() {
       try {
         const permission = await Notification.requestPermission();
@@ -48,13 +47,12 @@ export default function DeliveryLiveOrders() {
           const app = initializeApp(firebaseConfig);
           const messaging = getMessaging(app);
 
-          // Explicitly register and wait for the Service Worker to become active
           let swRegistration = null;
           if ('serviceWorker' in navigator) {
             try {
               swRegistration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
               swRegistration = await navigator.serviceWorker.ready;
-              console.log('✅ Service Worker is active and ready with scope:', swRegistration.scope);
+              console.log('✅ Service Worker active with scope:', swRegistration.scope);
             } catch (swErr) {
               console.warn('Service worker registration error:', swErr);
             }
@@ -70,19 +68,27 @@ export default function DeliveryLiveOrders() {
             await fetch(`${API_URL}/api/save-admin-token`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ token, role: 'delivery' }) // Explicitly pass role so backend routes it to delivery tokens
+              body: JSON.stringify({ token, role: 'delivery' })
             });
             console.log('✅ Delivery Partner FCM Token Registered Successfully:', token);
           }
 
-          // Handle foreground push messages when the app tab is actively open
+          // Handle active foreground push notifications
           onMessage(messaging, (payload) => {
             console.log('Foreground message received in active delivery tab:', payload);
             if ('Notification' in window && Notification.permission === 'granted') {
-              new Notification(payload.notification?.title || '⚡ New Order Dispatch', {
+              const notificationTitle = payload.notification?.title || '⚡ New Order Dispatch';
+              const notificationOptions = {
                 body: payload.notification?.body || 'You have a new delivery order!',
-                icon: '/icon.png'
-              });
+                icon: '/icon.png',
+                tag: 'delivery-dispatch'
+              };
+
+              if (swRegistration && swRegistration.showNotification) {
+                swRegistration.showNotification(notificationTitle, notificationOptions);
+              } else {
+                new Notification(notificationTitle, notificationOptions);
+              }
             }
           });
         }
@@ -138,7 +144,6 @@ export default function DeliveryLiveOrders() {
     };
   }, [isDeliveryLoggedIn]);
 
-  // Helper to safely extract assigned partner from any backend property variation
   const getAcceptedPartner = (ord) => {
     return ord.acceptedBy || ord.riderName || ord.deliveryPartner || ord.assignedTo || ord.rider || null;
   };
@@ -252,7 +257,6 @@ export default function DeliveryLiveOrders() {
     );
   }
 
-  // Filter orders based on active tab ('live' vs 'profile')
   const myAcceptedOrders = orders.filter(ord => {
     const partner = getAcceptedPartner(ord);
     return partner && partner.trim().toLowerCase() === deliveryPartnerName.trim().toLowerCase() && ord.status !== 'Delivered';
@@ -266,7 +270,6 @@ export default function DeliveryLiveOrders() {
   return (
     <div className="space-y-4 pb-20">
       
-      {/* Header & Tab Navigation Bar */}
       <div className="flex justify-between items-center px-1">
         <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center space-x-1.5">
           <span>⚡ Live 1-Tap Checkpoint Dispatcher</span>
@@ -288,7 +291,6 @@ export default function DeliveryLiveOrders() {
         </button>
       </div>
 
-      {/* TAB 1: LIVE ORDERS DISPATCH */}
       {activeTab === 'live' && (
         <div className="space-y-4">
           {orders.filter(o => o.status !== 'Delivered').length === 0 ? (
@@ -313,7 +315,6 @@ export default function DeliveryLiveOrders() {
               return (
                 <div key={orderId || idx} className="bg-white border border-orange-100 p-4 rounded-3xl shadow-sm space-y-3 relative">
                   
-                  {/* Top row: Order ID, Hotel Name & Exact Date/Time */}
                   <div className="flex justify-between items-center">
                     <div className="flex flex-col space-y-0.5">
                       <div className="flex items-center space-x-1.5">
@@ -330,7 +331,6 @@ export default function DeliveryLiveOrders() {
                     </div>
                   </div>
 
-                  {/* Hotel Rejection Notice if Hotel Rejected */}
                   {isRejectedByHotel && (
                     <div className="bg-rose-50 border border-rose-200 text-rose-800 p-3 rounded-xl text-xs font-bold text-center">
                       ❌ Order Rejected by Hotel Partner. Delivery dispatch cancelled.
@@ -339,7 +339,6 @@ export default function DeliveryLiveOrders() {
 
                   {!isRejectedByHotel && (
                     <>
-                      {/* First-Come, First-Served Acceptance Status Banner */}
                       <div className={`p-2.5 rounded-xl border text-xs flex justify-between items-center ${isAlreadyAccepted ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-amber-50 border-amber-200 text-amber-900'}`}>
                         <div>
                           <p className="font-extrabold text-[11px]">
@@ -363,7 +362,6 @@ export default function DeliveryLiveOrders() {
                         )}
                       </div>
 
-                      {/* Customer Contact & Full English Address / GPS Map Tracking */}
                       <div className="text-xs space-y-2 bg-orange-50/50 p-2.5 rounded-xl border border-orange-100">
                         <div className="flex justify-between items-center">
                           <span className="font-bold text-slate-900">👤 {ord.customerName || ord.name || 'Valued Customer'}</span>
@@ -393,7 +391,6 @@ export default function DeliveryLiveOrders() {
                         </div>
                       </div>
 
-                      {/* 1-Tap Dispatch Checkpoints */}
                       <div className="space-y-1.5">
                         <p className="text-[9px] font-black uppercase text-slate-400 tracking-wider">1-Tap Dispatch Checkpoints:</p>
                         <div className="grid grid-cols-2 gap-1.5">
@@ -426,7 +423,6 @@ export default function DeliveryLiveOrders() {
                     </>
                   )}
 
-                  {/* Ordered Items Breakdown */}
                   <div className="space-y-1.5 pt-2 border-t border-orange-100">
                     <div className="flex justify-between items-center">
                       <p className="text-[10px] font-bold uppercase text-slate-400">Order Items Breakdown</p>
@@ -447,7 +443,6 @@ export default function DeliveryLiveOrders() {
                     </div>
                   </div>
 
-                  {/* Footer Payment Info */}
                   <div className="flex justify-between items-center pt-2 text-[11px] border-t border-orange-100">
                     <span className="text-slate-500 font-medium">Payment: <strong className="text-slate-900">{ord.paymentMode || 'Online'}</strong> ({ord.paymentStatus || 'Paid'})</span>
                   </div>
@@ -459,7 +454,6 @@ export default function DeliveryLiveOrders() {
         </div>
       )}
 
-      {/* TAB 2: DELIVERY PARTNER PROFILE & STATS */}
       {activeTab === 'profile' && (
         <div className="space-y-4">
           <div className="bg-white border border-orange-100 p-4 rounded-3xl space-y-3">
