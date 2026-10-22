@@ -123,15 +123,33 @@ export default function DeliveryLiveOrders() {
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://food-cgs4.onrender.com';
 
     const socket = io(API_URL, {
-      transports: ['polling', 'websocket'],
+      transports: ['websocket', 'polling'],
       secure: true,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000
+    });
+
+    socket.on('connect', () => {
+      console.log('⚡ Delivery Live Orders socket connected:', socket.id);
+      fetchOrders();
     });
 
     socket.on('orderStatusUpdated', () => {
       fetchOrders();
     });
 
-    socket.on('newOrder', () => {
+    socket.on('newOrder', (newOrderData) => {
+      // Instant UI update optimization: Append or refetch immediately
+      if (newOrderData && (newOrderData._id || newOrderData.id)) {
+        setOrders(prev => {
+          const exists = prev.some(o => (o._id || o.id) === (newOrderData._id || newOrderData.id));
+          if (exists) {
+            return prev.map(o => (o._id || o.id) === (newOrderData._id || newOrderData.id) ? newOrderData : o);
+          }
+          return [newOrderData, ...prev];
+        });
+      }
       fetchOrders();
     });
 

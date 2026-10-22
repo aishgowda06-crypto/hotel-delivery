@@ -12,3 +12,17 @@ firebase.initializeApp({
 });
 
 const messaging = firebase.messaging();
+
+// Handle background push notifications when the app is closed, minimized, or in the background
+messaging.onBackgroundMessage((payload) => {
+  console.log('[firebase-messaging-sw.js] Received background message:', payload);
+  
+  const notificationTitle = payload.notification?.title || '⚡ New Order Dispatch';
+  const notificationOptions = {
+    body: payload.notification?.body || 'You have a new delivery order!',
+    icon: '/icon.png',
+    tag: 'delivery-dispatch'
+  };
+
+  self.registration.showNotification(notificationTitle, notificationOptions);
+});

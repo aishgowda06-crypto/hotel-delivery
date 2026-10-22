@@ -309,24 +309,17 @@ export default function HotelDashboardPage() {
         const savedSound = localStorage.getItem('shopmatries_notification_sound') || 'bell';
         startAudioLoop(savedSound);
 
-        // Native Web Notification showing exact Order ID, food item names, and strict catalog menu price total
+        // Native Web Notification showing exact Order ID and food item names (prices omitted per request)
         if ('Notification' in window && Notification.permission === 'granted') {
           const orderIdShort = (newOrder._id || newOrder.id || 'NEW').slice(-6);
-          const foodTotal = calculateFoodOnlyTotal(newOrder, menuItems);
           
           const itemSummary = newOrder.items?.map(i => {
-            const foodId = String(i.foodItem || i.id || '');
-            const itemName = (i.name || i.englishName || '').trim().toLowerCase();
-            const catalogItem = menuItems.find(m => 
-              String(m._id) === foodId || (itemName && m.name.trim().toLowerCase() === itemName)
-            );
-            const exactMenuPrice = catalogItem ? catalogItem.price : (i.basePrice || i.price || 0);
             const qty = i.quantity || i.qty || 1;
-            return `${qty}x ${i.englishName || i.itemName || i.dishName || i.name || 'Food Item'} (₹${exactMenuPrice} ea)`;
+            return `${qty}x ${i.englishName || i.itemName || i.dishName || i.name || 'Food Item'}`;
           }).join(', ') || 'New Food Item';
           
           newNotificationHandler(`🔔 New Order #${orderIdShort} (${storedHotel})`, {
-            body: `Items: ${itemSummary}\nMenu Food Total: ₹${foodTotal}`,
+            body: `Items: ${itemSummary}`,
             icon: '/icon.png'
           });
         }
@@ -452,7 +445,7 @@ export default function HotelDashboardPage() {
       className="max-w-md mx-auto space-y-4 pb-10 relative"
     >
       
-      {/* INCOMING ORDER POPUP ALERT MODAL WITH ORIGINAL MENU PRICES */}
+      {/* INCOMING ORDER POPUP ALERT MODAL (PRICES OMITTED PER REQUEST) */}
       {incomingPopupOrder && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn">
           <div className="bg-white border-2 border-orange-500 rounded-3xl p-5 max-w-sm w-full space-y-4 shadow-2xl text-center">
@@ -475,26 +468,15 @@ export default function HotelDashboardPage() {
             </div>
 
             <div className="bg-orange-50/70 border border-orange-200 rounded-2xl p-3 text-left space-y-1.5 max-h-40 overflow-y-auto">
-              <p className="text-[10px] font-black uppercase text-orange-800 border-b border-orange-200 pb-1">Ordered Items & Original Menu Prices</p>
+              <p className="text-[10px] font-black uppercase text-orange-800 border-b border-orange-200 pb-1">Ordered Items</p>
               {incomingPopupOrder.items?.map((item, idx) => {
-                const foodId = String(item.foodItem || item.id || '');
-                const itemName = (item.name || item.englishName || '').trim().toLowerCase();
-                const catalogItem = menuItems.find(m => 
-                  String(m._id) === foodId || (itemName && m.name.trim().toLowerCase() === itemName)
-                );
-                const itemPrice = catalogItem ? catalogItem.price : (item.basePrice || item.price || 0);
                 const itemQty = item.quantity || item.qty || 1;
                 return (
                   <div key={idx} className="flex justify-between items-center text-xs text-slate-800 font-bold">
                     <span>{itemQty}x {item.englishName || item.itemName || item.dishName || item.name || 'Food Item'}</span>
-                    <span className="font-mono text-orange-600">₹{itemPrice} each (Total: ₹{itemPrice * itemQty})</span>
                   </div>
                 );
               })}
-              <div className="pt-2 border-t border-orange-200 flex justify-between items-center text-xs font-black">
-                <span className="text-slate-900">Menu Food Total:</span>
-                <span className="text-orange-600 font-mono">₹{calculateFoodOnlyTotal(incomingPopupOrder, menuItems)}</span>
-              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-2 pt-2">
@@ -631,19 +613,12 @@ export default function HotelDashboardPage() {
                   </div>
 
                   <div className="text-[11px] text-slate-600 space-y-1 pt-1 border-t border-orange-100">
-                    <p className="text-[10px] font-bold uppercase text-slate-400">Ordered Items & Original Menu Prices:</p>
+                    <p className="text-[10px] font-bold uppercase text-slate-400">Ordered Items:</p>
                     {order.items?.map((item, i) => {
-                      const foodId = String(item.foodItem || item.id || '');
-                      const itemName = (item.name || item.englishName || '').trim().toLowerCase();
-                      const catalogItem = menuItems.find(m => 
-                        String(m._id) === foodId || (itemName && m.name.trim().toLowerCase() === itemName)
-                      );
-                      const itemPrice = catalogItem ? catalogItem.price : (item.basePrice || item.price || 0);
                       const itemQty = item.quantity || item.qty || 1;
                       return (
                         <div key={i} className="flex justify-between font-bold">
                           <span>{itemQty}x {item.englishName || item.itemName || item.dishName || item.name || 'Food Item'}</span>
-                          <span className="text-slate-900 font-mono">₹{itemPrice} each (₹{itemPrice * itemQty})</span>
                         </div>
                       );
                     })}
