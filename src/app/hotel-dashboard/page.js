@@ -185,7 +185,9 @@ export default function HotelDashboardPage() {
         const formattedMenu = finalMenuList.map((item, idx) => {
           const exactName = item.englishName || item.itemName || item.dishName || item.foodName || item.title || item.name || item.dish || item.strName || `Dish #${idx + 1}`;
           const exactPrice = item.basePrice !== undefined ? Number(item.basePrice) : Number(item.price || item.cost || item.amount || item.rate || 150);
-          const isAvail = item.isAvailable !== false && (item.available !== false);
+          
+          // Fixed: Properly check both isAvailable and available properties with true default fallback
+          const isAvail = item.isAvailable !== false && item.available !== false;
 
           const validId = item._id || item.id;
           if (!validId) return null;
@@ -312,17 +314,9 @@ export default function HotelDashboardPage() {
         // Native Web Notification showing exact Order ID, food item names, and strict catalog menu price total
         if ('Notification' in window && Notification.permission === 'granted') {
           const orderIdShort = (newOrder._id || newOrder.id || 'NEW').slice(-6);
-          const foodTotal = calculateFoodOnlyTotal(newOrder, menuItems);
           
           const itemSummary = newOrder.items?.map(i => {
-            const foodId = String(i.foodItem || i.id || '');
-            const itemName = (i.name || i.englishName || '').trim().toLowerCase();
-            const catalogItem = menuItems.find(m => 
-              String(m._id) === foodId || (itemName && m.name.trim().toLowerCase() === itemName)
-            );
-            
-            const qty = i.quantity || i.qty || 1;
-            return `${qty}x ${i.englishName || i.itemName || i.dishName || i.name || 'Food Item'}`;
+            return `${i.quantity || i.qty || 1}x ${i.englishName || i.itemName || i.dishName || i.name || 'Food Item'}`;
           }).join(', ') || 'New Food Item';
           
           newNotificationHandler(`🔔 New Order #${orderIdShort} (${storedHotel})`, {
@@ -352,7 +346,7 @@ export default function HotelDashboardPage() {
       clearInterval(pollInterval);
       stopAudioLoop();
     };
-  }, [menuItems]);
+  }, []);
 
   const toggleHotelStatus = async () => {
     const newStatus = !hotelStatus;
@@ -362,8 +356,8 @@ export default function HotelDashboardPage() {
       const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://food-cgs4.onrender.com';
       
       const isBrandAccount = restaurantProfile.isBrandAccount === true || 
-                             localStorage.getItem('shopmatries_is_brand') === 'true' ||
-                             restaurantProfile.type === 'brand';
+                            localStorage.getItem('shopmatries_is_brand') === 'true' ||
+                            restaurantProfile.type === 'brand';
 
       if (restaurantId) {
         const endpoint = isBrandAccount 
@@ -378,6 +372,8 @@ export default function HotelDashboardPage() {
       }
     } catch (err) {
       console.error('Failed to update hotel open status:', err);
+      // Revert state if backend call fails
+      setHotelStatus(!newStatus);
     }
   };
 
@@ -400,6 +396,7 @@ export default function HotelDashboardPage() {
   };
 
   const toggleItemAvailability = async (itemId) => {
+    // Optimistically update local menu items state immediately for snappy UI response
     setMenuItems(prev => prev.map(item => {
       if (item._id === itemId) {
         const updatedAvailability = !item.isAvailable;
@@ -409,7 +406,9 @@ export default function HotelDashboardPage() {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ isAvailable: updatedAvailability })
-        }).catch(() => {});
+        }).catch(err => {
+          console.error('Failed to sync item availability:', err);
+        });
 
         return { ...item, isAvailable: updatedAvailability };
       }
