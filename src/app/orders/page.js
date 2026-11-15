@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 import { initializeApp } from 'firebase/app';
 import { getMessaging, getToken, onMessage } from 'firebase/messaging';
@@ -12,6 +12,9 @@ export default function DeliveryLiveOrders() {
   const [activeTab, setActiveTab] = useState('live');
   const [deliveryPartnerName, setDeliveryPartnerName] = useState('Delivery Partner');
   const [deliveryPartnerPhone, setDeliveryPartnerPhone] = useState('');
+  const [selectedOrderForInvoice, setSelectedOrderForInvoice] = useState(null);
+
+  const invoiceRef = useRef(null);
 
   useEffect(() => {
     const deliveryAuth = localStorage.getItem('shopmatries_is_delivery_partner');
@@ -249,6 +252,87 @@ export default function DeliveryLiveOrders() {
     });
   };
 
+  const handlePrintThermalInvoice = () => {
+    const printWindow = window.open('', '_blank', 'width=350,height=600');
+    if (!printWindow) return;
+
+    const ord = selectedOrderForInvoice;
+    if (!ord) return;
+
+    const orderId = ord._id || ord.id || 'N/A';
+    const customerName = ord.customerName || ord.name || 'Valued Customer';
+    const hotelName = ord.hotelName || ord.restaurant || ord.brand || (ord.items && ord.items[0]?.hotelName) || 'Partner Hotel';
+    const orderTime = formatOrderDateTime(ord.createdAt || ord.time);
+    const deliveryFee = ord.deliveryFee || 30;
+    const totalPrice = ord.totalPrice || ord.estimatedPrice || 0;
+
+    let itemsHtml = '';
+    if (ord.items && Array.isArray(ord.items)) {
+      ord.items.forEach(item => {
+        const itemName = item.name || item.englishName || 'Item';
+        const itemQty = item.quantity || item.qty || 1;
+        const itemPrice = (item.price || 0) * itemQty;
+        itemsHtml += `
+          <div style="display:flex; justify-content:space-between; margin-bottom: 4px;">
+            <span>${itemQty}x ${itemName}</span>
+            <span>Rs.${itemPrice}</span>
+          </div>
+        `;
+      });
+    }
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Thermal Invoice - ${orderId}</title>
+          <style>
+            body {
+              font-family: 'Courier New', Courier, monospace;
+              width: 58mm;
+              margin: 0;
+              padding: 5px;
+              color: #000;
+              background: #fff;
+              font-size: 11px;
+              line-height: 1.2;
+            }
+            .text-center { text-align: center; }
+            .bold { font-weight: bold; }
+            .divider { border-top: 1px dashed #000; margin: 6px 0; }
+            .flex-between { display: flex; justify-content: space-between; }
+          </style>
+        </head>
+        <body onload="window.print(); window.close();">
+          <div class="text-center bold" style="font-size: 14px;">BUYBRIGG</div>
+          <div class="text-center" style="font-size: 10px;">ORDER INVOICE</div>
+          <div class="divider"></div>
+          <div><span class="bold">Order ID:</span> #${orderId.slice(-6)}</div>
+          <div><span class="bold">Date:</span> ${orderTime}</div>
+          <div><span class="bold">Customer:</span> ${customerName}</div>
+          <div><span class="bold">Hotel:</span> ${hotelName}</div>
+          <div class="divider"></div>
+          <div class="bold">ITEMS:</div>
+          ${itemsHtml}
+          <div style="display:flex; justify-content:space-between; margin-top: 4px;">
+            <span>Delivery Fee</span>
+            <span>Rs.${deliveryFee}</span>
+          </div>
+          <div class="divider"></div>
+          <div class="flex-between bold" style="font-size: 13px;">
+            <span>TOTAL:</span>
+            <span>Rs.${totalPrice}</span>
+          </div>
+          <div class="divider"></div>
+          <div class="text-center" style="font-size: 10px; margin-top: 8px;">
+            Thank you for ordering with BuyBrigg!
+          </div>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
   if (isCheckingAuth) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -343,9 +427,18 @@ export default function DeliveryLiveOrders() {
                       </div>
                       <span className="text-[10px] font-bold text-slate-500">📅 {displayTime}</span>
                     </div>
-                    <div className="text-right">
-                      <span className="text-[9px] uppercase font-bold text-slate-400 mr-1">TOTAL</span>
-                      <span className="text-sm font-black text-orange-600 font-mono">₹{ord.totalPrice || ord.estimatedPrice || 0}</span>
+                    <div className="text-right flex items-center gap-2">
+                      <div>
+                        <span className="text-[9px] uppercase font-bold text-slate-400 mr-1">TOTAL</span>
+                        <span className="text-sm font-black text-orange-600 font-mono">₹{ord.totalPrice || ord.estimatedPrice || 0}</span>
+                      </div>
+                      <button
+                        onClick={() => setSelectedOrderForInvoice(ord)}
+                        className="bg-orange-100 hover:bg-orange-200 text-orange-800 text-[10px] font-bold px-2 py-1.5 rounded-xl transition cursor-pointer"
+                        title="View Thermal Bill"
+                      >
+                        🖨️ Bill
+                      </button>
                     </div>
                   </div>
 
@@ -494,6 +587,77 @@ export default function DeliveryLiveOrders() {
                 <span className="text-emerald-600 font-black">{myDeliveredOrders.length} Orders</span>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Thermal Receipt Preview Modal */}
+      {selectedOrderForInvoice && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+            
+            {/* Close Button */}
+            <button
+              onClick={() => setSelectedOrderForInvoice(null)}
+              className="absolute top-4 right-4 bg-slate-100 hover:bg-slate-200 text-slate-600 w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs cursor-pointer"
+            >
+              ✕
+            </button>
+
+            {/* Thermal Black & White Preview Area */}
+            <div ref={invoiceRef} className="bg-white text-black font-mono p-4 border border-black rounded-xl space-y-3 text-xs">
+              <div className="text-center font-bold text-sm tracking-widest border-b border-black pb-2">
+                BUYBRIGG
+                <div className="text-[10px] font-normal">INVOICE RECEIPT</div>
+              </div>
+
+              <div className="space-y-1 text-[11px] border-b border-black pb-2">
+                <div><span className="font-bold">ID:</span> #{selectedOrderForInvoice._id ? selectedOrderForInvoice._id.slice(-6) : 'N/A'}</div>
+                <div><span className="font-bold">Time:</span> {formatOrderDateTime(selectedOrderForInvoice.createdAt || selectedOrderForInvoice.time)}</div>
+                <div><span className="font-bold">Customer:</span> {selectedOrderForInvoice.customerName || selectedOrderForInvoice.name || 'Valued Customer'}</div>
+                <div><span className="font-bold">Hotel:</span> {selectedOrderForInvoice.hotelName || selectedOrderForInvoice.restaurant || selectedOrderForInvoice.brand || 'Partner Hotel'}</div>
+              </div>
+
+              <div className="space-y-1.5 border-b border-black pb-2">
+                <div className="font-bold uppercase text-[10px]">Items:</div>
+                {selectedOrderForInvoice.items?.map((item, i) => (
+                  <div key={i} className="flex justify-between items-center text-[11px]">
+                    <span>{item.quantity || item.qty || 1}x {item.name || item.englishName || 'Item'}</span>
+                    <span>₹{(item.price || 0) * (item.quantity || item.qty || 1)}</span>
+                  </div>
+                ))}
+                <div className="flex justify-between items-center text-[11px] pt-1">
+                  <span>Delivery Fee</span>
+                  <span>₹{selectedOrderForInvoice.deliveryFee || 30}</span>
+                </div>
+              </div>
+
+              <div className="flex justify-between items-center font-bold text-sm pt-1">
+                <span>TOTAL:</span>
+                <span>₹{selectedOrderForInvoice.totalPrice || selectedOrderForInvoice.estimatedPrice || 0}</span>
+              </div>
+
+              <div className="text-center text-[10px] pt-2 border-t border-black">
+                *** THANK YOU! ***
+              </div>
+            </div>
+
+            {/* Action Buttons: Thermal Print & Close */}
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={handlePrintThermalInvoice}
+                className="flex-1 bg-black hover:bg-slate-800 text-white text-xs font-bold py-3 rounded-xl shadow transition cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <span>🖨️</span> Print Thermal Receipt
+              </button>
+              <button
+                onClick={() => setSelectedOrderForInvoice(null)}
+                className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-4 py-3 rounded-xl transition cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+
           </div>
         </div>
       )}
