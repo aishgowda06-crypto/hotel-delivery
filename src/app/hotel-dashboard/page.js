@@ -4,6 +4,32 @@ import { io } from 'socket.io-client';
 import { initializeApp } from 'firebase/app';
 import { getMessaging, getToken } from 'firebase/messaging';
 
+const DEFAULT_OPERATING_HOURS = {
+  Monday: { open: '08:00', close: '22:00', closed: false },
+  Tuesday: { open: '08:00', close: '22:00', closed: false },
+  Wednesday: { open: '08:00', close: '22:00', closed: false },
+  Thursday: { open: '08:00', close: '22:00', closed: false },
+  Friday: { open: '08:00', close: '23:00', closed: false },
+  Saturday: { open: '08:00', close: '23:00', closed: false },
+  Sunday: { open: '08:00', close: '22:00', closed: false }
+};
+
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+function normalizeOperatingHours(rawHours) {
+  const merged = {};
+  Object.keys(DEFAULT_OPERATING_HOURS).forEach((day) => {
+    const base = DEFAULT_OPERATING_HOURS[day];
+    const incoming = rawHours && typeof rawHours === 'object' ? rawHours[day] : null;
+    merged[day] = {
+      open: incoming?.open || base.open,
+      close: incoming?.close || base.close,
+      closed: typeof incoming?.closed === 'boolean' ? incoming.closed : base.closed,
+    };
+  });
+  return merged;
+}
+
 export default function HotelDashboardPage() {
   const [hotelName, setHotelName] = useState('Partner Hotel');
   const [restaurantId, setRestaurantId] = useState('');
@@ -12,6 +38,15 @@ export default function HotelDashboardPage() {
   const [hotelStatus, setHotelStatus] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  // Automatic operatingHours state (synced with backend restaurant/brand operatingHours)
+  const [autoScheduleEnabled, setAutoScheduleEnabled] = useState(true);
+  const [operatingHours, setOperatingHours] = useState(() => normalizeOperatingHours(null));
+  const [scheduleSavedMsg, setScheduleSavedMsg] = useState('');
+  const [savingSchedule, setSavingSchedule] = useState(false);
+
+  const todayName = DAY_NAMES[new Date().getDay()];
+  const todayHours = operatingHours[todayName] || DEFAULT_OPERATING_HOURS[todayName];
   
   // Navigation & Sound settings state
   const [activeTab, setActiveTab] = useState('orders');
@@ -24,6 +59,30 @@ export default function HotelDashboardPage() {
 
   // Audio looping reference so sound repeats continuously until an order is accepted or rejected
   const audioLoopRef = useRef(null);
+  // Prevent 5s polling from overwriting schedule while user is editing or saving
+  const scheduleDirtyRef = useRef(false);
+  const scheduleLockUntilRef = useRef(0);
+
+  // Helper to extract schedule fields matching the backend operatingHours structure
+  const extractScheduleFromRecord = (record) => {
+    if (!record || typeof record !== 'object') return null;
+
+    const enabled =
+      record.autoMode !== undefined
+        ? Boolean(record.autoMode)
+        : Boolean(record.autoScheduleEnabled ?? record.isAutoSchedule ?? true);
+
+    const rawHours =
+      (record.operatingHours && typeof record.operatingHours === 'object' ? record.operatingHours : null) ||
+      (record.schedule && typeof record.schedule === 'object' ? record.schedule : null) ||
+      (record.timings && typeof record.timings === 'object' ? record.timings : null) ||
+      null;
+
+    return {
+      enabled,
+      operatingHours: normalizeOperatingHours(rawHours),
+    };
+  };
 
   // Helper to strictly calculate food-only total price using original menu prices from catalog with fallback name matching
   const calculateFoodOnlyTotal = (order, currentMenu) => {
@@ -143,18 +202,25 @@ export default function HotelDashboardPage() {
         });
 
         let targetRestId = '';
-        if (currentBrand) {
-          targetRestId = currentBrand._id || currentBrand.id;
+        const activeRecord = currentBrand || currentRest;
+        if (activeRecord) {
+          targetRestId = activeRecord._id || activeRecord.id;
           setRestaurantId(targetRestId);
-          const isOpenState = currentBrand.isManuallyOpen !== undefined ? currentBrand.isManuallyOpen : (currentBrand.isOpen !== undefined ? currentBrand.isOpen : true);
+          const isOpenState = activeRecord.isManuallyOpen !== undefined ? activeRecord.isManuallyOpen : (activeRecord.isOpen !== undefined ? activeRecord.isOpen : true);
           setHotelStatus(isOpenState);
-          setRestaurantProfile({ ...currentBrand, isBrandAccount: true });
-        } else if (currentRest) {
-          targetRestId = currentRest._id || currentRest.id;
-          setRestaurantId(targetRestId);
-          const isOpenState = currentRest.isManuallyOpen !== undefined ? currentRest.isManuallyOpen : (currentRest.isOpen !== undefined ? currentRest.isOpen : true);
-          setHotelStatus(isOpenState);
-          setRestaurantProfile({ ...currentRest, isBrandAccount: false });
+          setRestaurantProfile({ ...activeRecord, isBrandAccount: Boolean(currentBrand) });
+
+          const canSyncSchedule =
+            isInitial ||
+            (!scheduleDirtyRef.current && Date.now() > scheduleLockUntilRef.current);
+
+          if (canSyncSchedule) {
+            const parsedSchedule = extractScheduleFromRecord(activeRecord);
+            if (parsedSchedule) {
+              setAutoScheduleEnabled(parsedSchedule.enabled);
+              setOperatingHours(parsedSchedule.operatingHours);
+            }
+          }
         }
 
         const allFoods = Array.isArray(foodData) ? foodData : (foodData.foods || foodData.items || foodData.data || foodData.result || []);
@@ -348,32 +414,86 @@ export default function HotelDashboardPage() {
     };
   }, []);
 
+  const handleDayHourChange = (day, field, value) => {
+    scheduleDirtyRef.current = true;
+    scheduleLockUntilRef.current = Date.now() + 20000;
+    setOperatingHours(prev => ({
+      ...prev,
+      [day]: {
+        ...prev[day],
+        [field]: value
+      }
+    }));
+  };
+
+  const persistScheduleToBackend = async (enabledVal, hoursVal, manualOpenVal) => {
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://food-cgs4.onrender.com';
+    const isBrandAccount =
+      restaurantProfile.isBrandAccount === true ||
+      localStorage.getItem('shopmatries_is_brand') === 'true' ||
+      restaurantProfile.type === 'brand';
+
+    if (!restaurantId) return true;
+
+    const endpoint = isBrandAccount
+      ? `${API_URL}/api/brands/${restaurantId}/hours`
+      : `${API_URL}/api/restaurants/${restaurantId}/hours`;
+
+    const normalizedHours = normalizeOperatingHours(hoursVal);
+    const res = await fetch(endpoint, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        autoMode: Boolean(enabledVal),
+        isManuallyOpen: Boolean(manualOpenVal),
+        isOpen: Boolean(manualOpenVal),
+        operatingHours: normalizedHours,
+      }),
+    });
+
+    if (!res.ok) {
+      throw new Error(`Schedule update failed (${res.status})`);
+    }
+    return true;
+  };
+
   const toggleHotelStatus = async () => {
     const newStatus = !hotelStatus;
     setHotelStatus(newStatus);
+    scheduleLockUntilRef.current = Date.now() + 10000;
 
     try {
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://food-cgs4.onrender.com';
-      
-      const isBrandAccount = restaurantProfile.isBrandAccount === true || 
-                            localStorage.getItem('shopmatries_is_brand') === 'true' ||
-                            restaurantProfile.type === 'brand';
-
-      if (restaurantId) {
-        const endpoint = isBrandAccount 
-          ? `${API_URL}/api/brands/${restaurantId}/hours` 
-          : `${API_URL}/api/restaurants/${restaurantId}/hours`;
-
-        await fetch(endpoint, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ isManuallyOpen: newStatus, isOpen: newStatus, autoMode: false })
-        });
-      }
+      await persistScheduleToBackend(autoScheduleEnabled, operatingHours, newStatus);
     } catch (err) {
       console.error('Failed to update hotel open status:', err);
       // Revert state if backend call fails
       setHotelStatus(!newStatus);
+    }
+  };
+
+  const handleSaveAutoSchedule = async (nextEnabled = autoScheduleEnabled) => {
+    setSavingSchedule(true);
+    setScheduleSavedMsg('');
+    scheduleDirtyRef.current = false;
+    scheduleLockUntilRef.current = Date.now() + 15000;
+
+    try {
+      const normalized = normalizeOperatingHours(operatingHours);
+      setOperatingHours(normalized);
+      await persistScheduleToBackend(nextEnabled, normalized, hotelStatus);
+      const activeDay = normalized[todayName] || DEFAULT_OPERATING_HOURS[todayName];
+      setScheduleSavedMsg(
+        nextEnabled
+          ? (activeDay.closed ? `Auto schedule active (${todayName}: Day Off)` : `Auto schedule saved (${todayName}: ${activeDay.open} - ${activeDay.close})`)
+          : 'Auto schedule turned off'
+      );
+      setTimeout(() => setScheduleSavedMsg(''), 3000);
+    } catch (err) {
+      console.error('Failed to save automatic schedule:', err);
+      scheduleDirtyRef.current = true;
+      setScheduleSavedMsg('Failed to save schedule to backend');
+    } finally {
+      setSavingSchedule(false);
     }
   };
 
@@ -520,6 +640,13 @@ export default function HotelDashboardPage() {
           <div>
             <span className="text-[10px] font-black uppercase text-orange-600 tracking-wider">Hotel Control Hub</span>
             <h2 className="text-base font-black text-slate-900">{hotelName}</h2>
+            <p className="text-[10px] font-bold text-slate-500 mt-0.5">
+              {autoScheduleEnabled
+                ? (todayHours.closed
+                    ? `🕒 Auto Schedule (${todayName}): Day Off`
+                    : `🕒 Auto Schedule (${todayName}): ${todayHours.open} – ${todayHours.close}`)
+                : '🕒 Mode: Manual Control'}
+            </p>
           </div>
           <button
             onClick={toggleHotelStatus}
@@ -671,6 +798,79 @@ export default function HotelDashboardPage() {
                 {hotelStatus ? '🟢 Open' : '🔴 Closed'}
               </button>
             </div>
+          </div>
+
+          {/* AUTOMATIC SCHEDULE CARD */}
+          <div className="bg-white border border-orange-100 p-4 rounded-2xl space-y-3">
+            <div className="flex justify-between items-center">
+              <div>
+                <h3 className="text-xs font-black uppercase text-slate-700">🕒 Automatic Schedule</h3>
+                <p className="text-[10px] text-slate-500">Synced with Admin operatingHours schedule</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !autoScheduleEnabled;
+                  setAutoScheduleEnabled(next);
+                  handleSaveAutoSchedule(next);
+                }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-black transition cursor-pointer ${autoScheduleEnabled ? 'bg-orange-600 text-white' : 'bg-slate-200 text-slate-700'}`}
+              >
+                {autoScheduleEnabled ? 'Auto ON' : 'Auto OFF'}
+              </button>
+            </div>
+
+            <div className="space-y-2 pt-2 border-t border-orange-50">
+              {Object.keys(operatingHours).map(day => {
+                const dayData = operatingHours[day];
+                return (
+                  <div key={day} className="flex items-center justify-between bg-orange-50/30 p-2 rounded-xl border border-orange-100 text-[11px]">
+                    <span className="font-bold w-16 text-slate-800">{day.slice(0, 3)}</span>
+                    <label className="flex items-center space-x-1 text-[10px] text-slate-500 font-bold cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={dayData.closed}
+                        onChange={(e) => handleDayHourChange(day, 'closed', e.target.checked)}
+                        className="accent-orange-600 cursor-pointer"
+                      />
+                      <span>Closed</span>
+                    </label>
+                    {!dayData.closed ? (
+                      <div className="flex items-center space-x-1">
+                        <input
+                          type="time"
+                          value={dayData.open}
+                          onChange={(e) => handleDayHourChange(day, 'open', e.target.value)}
+                          className="bg-white border border-orange-200 rounded-lg p-1 text-[10px] font-mono font-bold"
+                        />
+                        <span>-</span>
+                        <input
+                          type="time"
+                          value={dayData.close}
+                          onChange={(e) => handleDayHourChange(day, 'close', e.target.value)}
+                          className="bg-white border border-orange-200 rounded-lg p-1 text-[10px] font-mono font-bold"
+                        />
+                      </div>
+                    ) : (
+                      <span className="text-[10px] font-bold text-rose-600 italic">Day Off</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => handleSaveAutoSchedule(autoScheduleEnabled)}
+              disabled={savingSchedule}
+              className="w-full bg-orange-600 hover:bg-orange-700 text-white font-black text-xs py-2.5 rounded-xl shadow-sm transition cursor-pointer disabled:opacity-60"
+            >
+              {savingSchedule ? 'Saving Schedule...' : 'Save Automatic Schedule'}
+            </button>
+
+            {scheduleSavedMsg && (
+              <p className="text-[11px] font-bold text-emerald-700 text-center">{scheduleSavedMsg}</p>
+            )}
           </div>
         </div>
       )}
